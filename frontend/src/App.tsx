@@ -63,10 +63,19 @@ export function App() {
   });
   const [showLoginModal, setShowLoginModal] = useState<boolean>(false);
 
-  // Check URL view parameter (e.g. ?view=store)
+  // Check URL view parameter (e.g. ?view=store, /tienda, /store, #tienda)
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    if (params.get('view') === 'store') {
+    const path = window.location.pathname.toLowerCase();
+    const hash = window.location.hash.toLowerCase();
+    if (
+      params.get('view') === 'store' ||
+      path.includes('/tienda') ||
+      path.includes('/store') ||
+      path.includes('/catalogo') ||
+      hash.includes('tienda') ||
+      hash.includes('store')
+    ) {
       setCurrentView('store');
     }
   }, []);
