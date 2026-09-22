@@ -369,299 +369,105 @@ export function initDatabase() {
   }
 
   seedInitialData();
+
+  // Comprobación y limpieza automática de datos de prueba existentes
+  try {
+    const hasMock = db.prepare("SELECT count(*) as count FROM products WHERE code IN ('7591001001', '01010')").get()?.count > 0;
+    const hasOldSales = db.prepare("SELECT count(*) as count FROM sales").get()?.count > 0;
+    const hasOldOrders = db.prepare("SELECT count(*) as count FROM online_orders WHERE order_number = 'ORD-1001'").get()?.count > 0;
+    if (hasMock || hasOldSales || hasOldOrders) {
+      clearTestData();
+    }
+  } catch (e) {
+    console.error('[DATABASE] Error comprobando datos de prueba:', e);
+  }
 }
+
+export function clearTestData() {
+  db.pragma('foreign_keys = OFF');
+  try {
+    const tablesToClear = [
+      'sale_payments',
+      'sale_items',
+      'sales',
+      'credit_payments',
+      'online_order_items',
+      'online_orders',
+      'stock_movements',
+      'purchase_items',
+      'purchases',
+      'batches',
+      'products',
+      'cash_movements',
+      'cash_registers'
+    ];
+
+    for (const table of tablesToClear) {
+      try { db.prepare(`DELETE FROM ${table}`).run(); } catch(e){}
+    }
+    // Mantener únicamente Consumidor Final sin deuda
+    try { db.prepare(`DELETE FROM customers WHERE id_number != 'V-12345678'`).run(); } catch(e){}
+    try { db.prepare(`UPDATE customers SET current_debt = 0, credit_limit = 0 WHERE id_number = 'V-12345678'`).run(); } catch(e){}
+    // Resetear balance de proveedores a cero
+    try { db.prepare(`UPDATE suppliers SET balance_due = 0`).run(); } catch(e){}
+    // Reiniciar contadores autoincrementales
+    try {
+      db.prepare(`DELETE FROM sqlite_sequence WHERE name IN (${tablesToClear.map(t => `'${t}'`).join(',')})`).run();
+    } catch (e) {}
+  } finally {
+    db.pragma('foreign_keys = ON');
+  }
+  console.log('[DATABASE] Base de datos reseteada a cero: artículos, ventas, pedidos y abonos eliminados.');
+}
+
 
 function seedInitialData() {
-  const count = db.prepare('SELECT count(*) as total FROM products').get().total;
-  if (count > 0) return; // Already seeded
-
-  console.log('Seeding initial pharmacy database...');
-
   // 1. Depósitos / Almacenes
-  const insertWarehouse = db.prepare(`
-    INSERT INTO warehouses (code, name, location_desc, is_default)
-    VALUES (?, ?, ?, ?)
-  `);
-  insertWarehouse.run('ALM-01', 'Farmacia Principal / Mostrador', 'Estanterías A, B y C - Mostrador de atención', 1);
-  insertWarehouse.run('ALM-02', 'Depósito Central / Bodega', 'Almacén trasero climatizado', 0);
-  insertWarehouse.run('ALM-03', 'Nevera / Cadena de Frío (2°C - 8°C)', 'Refrigerador médico especializado', 0);
-
-  // 2. Empleados
-  const insertEmp = db.prepare(`
-    INSERT INTO employees (name, id_number, phone, role, shift, username, pin)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `);
-  insertEmp.run('Carlos Mendoza', 'V-18492019', '0414-555-1234', 'ADMIN', 'Completo', 'admin', '1234');
-  insertEmp.run('Dra. María Elena Rivas', 'V-15893201', '0412-444-5678', 'FARMACEUTICO', 'Mañana', 'mrivas', '2244');
-  insertEmp.run('Alejandro Gómez', 'V-24890123', '0416-333-9012', 'CAJERO', 'Tarde', 'agomez', '1122');
-  insertEmp.run('Pedro Salazar', 'V-21345678', '0424-777-8899', 'BODEGUERO', 'Mañana', 'psalazar', '3344');
-
-  // 3. Proveedores
-  const insertSupplier = db.prepare(`
-    INSERT INTO suppliers (name, tax_id, phone, email, address, contact_person, balance_due)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `);
-  insertSupplier.run('Droguería Nena C.A.', 'J-00049281-2', '0212-555-0101', 'ventas@droguerianena.com', 'Zona Industrial Los Ruices, Edif. Nena', 'Lic. Roberto Silva', 0.0);
-  insertSupplier.run('Distribuidora Cobeca', 'J-07019284-9', '0261-700-1122', 'contacto@cobeca.com', 'Av. 5 de Julio, Maracaibo', 'Ing. Patricia Urdaneta', 450.0);
-  insertSupplier.run('Laboratorios Genfar S.A.', 'J-30491823-0', '0212-888-3400', 'pedidos@genfar.com', 'Av. Francisco de Miranda, Caracas', 'Marcos Velásquez', 0.0);
-  insertSupplier.run('Laboratorios Calox International', 'J-00084921-5', '0212-999-7700', 'atencion@calox.com', 'Calle Los Laboratorios, Los Cortijos', 'Dra. Carmen Soto', 120.0);
-
-  // 4. Clientes
-  const insertCustomer = db.prepare(`
-    INSERT INTO customers (id_number, name, phone, email, address, credit_limit, current_debt, credit_days, notes)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-  insertCustomer.run('V-12345678', 'Consumidor Final', '0000-0000000', 'ventas@farmacia.com', 'Mostrador', 0, 0, 0, 'Cliente genérico mostrador');
-  insertCustomer.run('V-14920194', 'Eduardo José Rodríguez', '0414-111-2233', 'eduardo.r@gmail.com', 'Urb. El Rosal, Av. Tamanaco, Res. Ávila Apto 4B', 300.0, 45.5, 30, 'Cliente frecuente - Crédito aprobado');
-  insertCustomer.run('V-17823901', 'Mariana Isabel Castillo', '0424-999-8877', 'mariana_castillo@hotmail.com', 'Av. Libertador, Edif. Centro, Piso 2', 200.0, 0.0, 15, 'Paciente crónico');
-  insertCustomer.run('V-09823102', 'Dr. Guillermo Valera', '0412-666-5544', 'gvalera@clinicasanrafael.com', 'Consultorio Médico San Rafael, Av. Principal', 500.0, 120.0, 45, 'Médico de la zona');
-
-  // 5. Medicamentos e Inventario
-  const insertProduct = db.prepare(`
-    INSERT INTO products (
-      code, name, generic_name, category, presentation, laboratory,
-      prescription_required, cost_price, selling_price, min_stock,
-      image_url, description, warehouse_location
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  const insertBatch = db.prepare(`
-    INSERT INTO batches (product_id, batch_number, expiry_date, stock, initial_stock, cost_price)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `);
-
-  const initialMedicines = [
-    {
-      code: '7591001001',
-      name: 'Amoxicilina + Ácido Clavulánico 875/125mg',
-      generic_name: 'Amoxicilina / Ác. Clavulánico',
-      category: 'Antibióticos',
-      presentation: 'Caja x 14 Tabletas Recubiertas',
-      laboratory: 'Genfar',
-      prescription: 1,
-      cost: 4.80,
-      price: 8.50,
-      min_stock: 10,
-      image: 'https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?w=500&auto=format&fit=crop&q=60',
-      description: 'Antibiótico de amplio espectro para infecciones respiratorias, otorrinolaringológicas y dentales.',
-      location: 'Estante A - Nivel 2 (Bajo Llave)',
-      batches: [
-        { number: 'LT-2024-AM01', expiry: '2027-05-15', stock: 24, cost: 4.80 },
-        { number: 'LT-2023-AM09', expiry: '2026-11-20', stock: 12, cost: 4.60 } // próximo a vencer
-      ]
-    },
-    {
-      code: '7591001002',
-      name: 'Ibuprofeno 600mg',
-      generic_name: 'Ibuprofeno',
-      category: 'Analgésicos y Antiinflamatorios',
-      presentation: 'Caja x 20 Tabletas',
-      laboratory: 'Calox',
-      prescription: 0,
-      cost: 1.50,
-      price: 3.20,
-      min_stock: 15,
-      image: 'https://images.unsplash.com/photo-1585435557343-3b092031a831?w=500&auto=format&fit=crop&q=60',
-      description: 'Alivio eficaz de dolor moderado, inflamación osteoarticular y dolor de cabeza.',
-      location: 'Estante B - Nivel 1',
-      batches: [
-        { number: 'LT-2025-IB01', expiry: '2028-02-10', stock: 45, cost: 1.50 }
-      ]
-    },
-    {
-      code: '7591001003',
-      name: 'Paracetamol / Acetaminofén 500mg',
-      generic_name: 'Acetaminofén',
-      category: 'Analgésicos y Antipiréticos',
-      presentation: 'Caja x 20 Tabletas',
-      laboratory: 'Laboratorios Behrens',
-      prescription: 0,
-      cost: 0.90,
-      price: 2.10,
-      min_stock: 20,
-      image: 'https://images.unsplash.com/photo-1550572017-edd951aa8f72?w=500&auto=format&fit=crop&q=60',
-      description: 'Analgésico y antipirético de primera línea para fiebre y malestar general.',
-      location: 'Estante B - Nivel 1',
-      batches: [
-        { number: 'LT-2025-ACT1', expiry: '2027-10-30', stock: 60, cost: 0.90 },
-        { number: 'LT-2024-ACT2', expiry: '2026-10-15', stock: 15, cost: 0.85 } // vence pronto
-      ]
-    },
-    {
-      code: '7591001004',
-      name: 'Losartán Potásico 50mg',
-      generic_name: 'Losartán Potásico',
-      category: 'Cardiovascular y Presión Arterial',
-      presentation: 'Caja x 30 Tabletas',
-      laboratory: 'Laboratorios Leti',
-      prescription: 1,
-      cost: 2.90,
-      price: 5.80,
-      min_stock: 12,
-      image: 'https://images.unsplash.com/photo-1471864190281-a93a3070b6de?w=500&auto=format&fit=crop&q=60',
-      description: 'Antihipertensivo antagonista del receptor de angiotensina II para control de presión arterial.',
-      location: 'Estante C - Nivel 2',
-      batches: [
-        { number: 'LT-2025-LOS1', expiry: '2027-08-14', stock: 35, cost: 2.90 }
-      ]
-    },
-    {
-      code: '7591001005',
-      name: 'Metformina 850mg',
-      generic_name: 'Metformina Clorhidrato',
-      category: 'Diabetes y Endocrinología',
-      presentation: 'Caja x 30 Tabletas',
-      laboratory: 'Genfar',
-      prescription: 1,
-      cost: 2.20,
-      price: 4.50,
-      min_stock: 10,
-      image: 'https://images.unsplash.com/photo-1576602976047-174e57a47881?w=500&auto=format&fit=crop&q=60',
-      description: 'Normoglicemiante oral para tratamiento de diabetes mellitus tipo 2.',
-      location: 'Estante C - Nivel 3',
-      batches: [
-        { number: 'LT-2025-MET1', expiry: '2027-12-01', stock: 28, cost: 2.20 }
-      ]
-    },
-    {
-      code: '7591001006',
-      name: 'Loratadina 10mg',
-      generic_name: 'Loratadina',
-      category: 'Antialérgicos y Antihistamínicos',
-      presentation: 'Caja x 10 Tabletas',
-      laboratory: 'Calox',
-      prescription: 0,
-      cost: 1.10,
-      price: 2.50,
-      min_stock: 15,
-      image: 'https://images.unsplash.com/photo-1587854692152-cbe660dbde88?w=500&auto=format&fit=crop&q=60',
-      description: 'Antihistamínico no sedante de acción prolongada para rinitis y alergias cutáneas.',
-      location: 'Estante B - Nivel 2',
-      batches: [
-        { number: 'LT-2025-LOR1', expiry: '2028-04-20', stock: 40, cost: 1.10 }
-      ]
-    },
-    {
-      code: '7591001007',
-      name: 'Omeprazol 20mg',
-      generic_name: 'Omeprazol',
-      category: 'Gastrointestinal',
-      presentation: 'Caja x 14 Cápsulas',
-      laboratory: 'Laboratorios Behrens',
-      prescription: 0,
-      cost: 1.80,
-      price: 3.90,
-      min_stock: 12,
-      image: 'https://images.unsplash.com/photo-1628771065518-0d82f1938462?w=500&auto=format&fit=crop&q=60',
-      description: 'Inhibidor de la bomba de protones para reflujo gástrico, gastritis y acidez.',
-      location: 'Estante B - Nivel 3',
-      batches: [
-        { number: 'LT-2025-OM01', expiry: '2027-09-18', stock: 32, cost: 1.80 }
-      ]
-    },
-    {
-      code: '7591001008',
-      name: 'Suero Oral Rehidratante Manzana',
-      generic_name: 'Sales de Rehidratación Oral',
-      category: 'Pediatría y Nutrición',
-      presentation: 'Frasco 500ml',
-      laboratory: 'Laboratorios Leti',
-      prescription: 0,
-      cost: 1.40,
-      price: 2.80,
-      min_stock: 10,
-      image: 'https://images.unsplash.com/photo-1559839734-2b71ea197ec2?w=500&auto=format&fit=crop&q=60',
-      description: 'Solución electrolítica equilibrada para prevenir deshidratación por diarrea o vómito.',
-      location: 'Estante D - Nivel 1',
-      batches: [
-        { number: 'LT-2025-SRO1', expiry: '2026-12-31', stock: 18, cost: 1.40 }
-      ]
-    },
-    {
-      code: '7591001009',
-      name: 'Vitamina C 1000mg + Zinc Efervescente',
-      generic_name: 'Ácido Ascórbico + Zinc',
-      category: 'Vitaminas y Suplementos',
-      presentation: 'Tubo x 10 Tabletas Efervescentes',
-      laboratory: 'Bayer',
-      prescription: 0,
-      cost: 2.60,
-      price: 5.20,
-      min_stock: 15,
-      image: 'https://images.unsplash.com/photo-1577401239170-897942555fb3?w=500&auto=format&fit=crop&q=60',
-      description: 'Refuerzo del sistema inmunológico y acción antioxidante.',
-      location: 'Estante D - Nivel 2',
-      batches: [
-        { number: 'LT-2025-VTC1', expiry: '2028-01-15', stock: 50, cost: 2.60 }
-      ]
-    },
-    {
-      code: '7591001010',
-      name: 'Alcohol Antiséptico 70% 500ml',
-      generic_name: 'Alcohol Etílico 70°',
-      category: 'Material Médico y Desinfección',
-      presentation: 'Frasco 500ml con dispensador',
-      laboratory: 'Droguería Nena',
-      prescription: 0,
-      cost: 1.00,
-      price: 2.00,
-      min_stock: 20,
-      image: 'https://images.unsplash.com/photo-1584744982491-665216d95f8b?w=500&auto=format&fit=crop&q=60',
-      description: 'Antiséptico de uso tópico hospitalario y desinfección de manos.',
-      location: 'Depósito Almacén 1',
-      batches: [
-        { number: 'LT-2025-ALC1', expiry: '2029-06-30', stock: 75, cost: 1.00 }
-      ]
-    }
-  ];
-
-  for (const m of initialMedicines) {
-    const res = insertProduct.run(
-      m.code, m.name, m.generic_name, m.category, m.presentation, m.laboratory,
-      m.prescription, m.cost, m.price, m.min_stock, m.image, m.description, m.location
-    );
-    const prodId = res.lastInsertRowid;
-    for (const b of m.batches) {
-      insertBatch.run(prodId, b.number, b.expiry, b.stock, b.stock, b.cost);
-    }
+  const warehouseCount = db.prepare('SELECT count(*) as total FROM warehouses').get().total;
+  if (warehouseCount === 0) {
+    const insertWarehouse = db.prepare(`
+      INSERT INTO warehouses (code, name, location_desc, is_default)
+      VALUES (?, ?, ?, ?)
+    `);
+    insertWarehouse.run('ALM-01', 'Farmacia Principal / Mostrador', 'Estanterías A, B y C - Mostrador de atención', 1);
+    insertWarehouse.run('ALM-02', 'Depósito Central / Bodega', 'Almacén trasero climatizado', 0);
+    insertWarehouse.run('ALM-03', 'Nevera / Cadena de Frío (2°C - 8°C)', 'Refrigerador médico especializado', 0);
   }
 
-  // 6. Apertura de Caja por defecto para iniciar operaciones
-  const insertCash = db.prepare(`
-    INSERT INTO cash_registers (employee_id, opening_balance, status, notes)
-    VALUES (?, ?, 'OPEN', 'Apertura de turno de la mañana')
-  `);
-  const cashRes = insertCash.run(1, 100.0);
-  const cashId = cashRes.lastInsertRowid;
+  // 2. Empleados para inicio de sesión
+  const empCount = db.prepare('SELECT count(*) as total FROM employees').get().total;
+  if (empCount === 0) {
+    const insertEmp = db.prepare(`
+      INSERT INTO employees (name, id_number, phone, role, shift, username, pin)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+    insertEmp.run('Carlos Mendoza', 'V-18492019', '0414-555-1234', 'ADMIN', 'Completo', 'admin', '1234');
+    insertEmp.run('Dra. María Elena Rivas', 'V-15893201', '0412-444-5678', 'FARMACEUTICO', 'Mañana', 'mrivas', '2244');
+    insertEmp.run('Alejandro Gómez', 'V-24890123', '0416-333-9012', 'CAJERO', 'Tarde', 'agomez', '1122');
+    insertEmp.run('Pedro Salazar', 'V-21345678', '0424-777-8899', 'BODEGUERO', 'Mañana', 'psalazar', '3344');
+  }
 
-  // Movimiento inicial
-  db.prepare(`
-    INSERT INTO cash_movements (cash_register_id, type, amount, reason, employee_id)
-    VALUES (?, 'INCOME', 100.0, 'Fondo inicial de cambio en efectivo', 1)
-  `).run(cashId);
+  // 3. Proveedores iniciales
+  const supCount = db.prepare('SELECT count(*) as total FROM suppliers').get().total;
+  if (supCount === 0) {
+    const insertSupplier = db.prepare(`
+      INSERT INTO suppliers (name, tax_id, phone, email, address, contact_person, balance_due)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+    insertSupplier.run('Droguería Nena C.A.', 'J-00049281-2', '0212-555-0101', 'ventas@droguerianena.com', 'Zona Industrial Los Ruices, Edif. Nena', 'Lic. Roberto Silva', 0.0);
+    insertSupplier.run('Distribuidora Cobeca', 'J-07019284-9', '0261-700-1122', 'contacto@cobeca.com', 'Av. 5 de Julio, Maracaibo', 'Ing. Patricia Urdaneta', 0.0);
+    insertSupplier.run('Laboratorios Genfar S.A.', 'J-30491823-0', '0212-888-3400', 'pedidos@genfar.com', 'Av. Francisco de Miranda, Caracas', 'Marcos Velásquez', 0.0);
+    insertSupplier.run('Laboratorios Calox International', 'J-00084921-5', '0212-999-7700', 'atencion@calox.com', 'Calle Los Laboratorios, Los Cortijos', 'Dra. Carmen Soto', 0.0);
+  }
 
-  // 7. Simulación de un pedido online pendiente de prueba
-  const orderRes = db.prepare(`
-    INSERT INTO online_orders (
-      order_number, customer_name, customer_phone, customer_email,
-      delivery_type, delivery_address, payment_method, status,
-      subtotal, delivery_fee, total, notes
-    ) VALUES (
-      'ORD-1001', 'Valeria Hernández', '0414-998-7711', 'valeria.h@outlook.com',
-      'DELIVERY', 'Av. Principal de Las Mercedes, Edif. Parque Plaza, Torre B, Apto 12',
-      'TRANSFERENCIA', 'PENDING', 11.70, 2.50, 14.20, 'Favor tocar timbre B-12'
-    )
-  `).run();
-
-  const orderId = orderRes.lastInsertRowid;
-  db.prepare(`
-    INSERT INTO online_order_items (order_id, product_id, product_name, quantity, unit_price, subtotal)
-    VALUES (?, 1, 'Amoxicilina + Ácido Clavulánico 875/125mg', 1, 8.50, 8.50)
-  `).run(orderId);
-  db.prepare(`
-    INSERT INTO online_order_items (order_id, product_id, product_name, quantity, unit_price, subtotal)
-    VALUES (?, 2, 'Ibuprofeno 600mg', 1, 3.20, 3.20)
-  `).run(orderId);
-
-  console.log('Database seeded successfully!');
+  // 4. Clientes: Consumidor Final genérico
+  const custCount = db.prepare("SELECT count(*) as total FROM customers WHERE id_number = 'V-12345678'").get().total;
+  if (custCount === 0) {
+    const insertCustomer = db.prepare(`
+      INSERT INTO customers (id_number, name, phone, email, address, credit_limit, current_debt, credit_days, notes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    insertCustomer.run('V-12345678', 'Consumidor Final', '0000-0000000', 'ventas@farmacia.com', 'Mostrador', 0, 0, 0, 'Cliente genérico mostrador');
+  }
 }
+

@@ -6,7 +6,7 @@ import cors from 'cors';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
-import { db, initDatabase } from './db.js';
+import { db, initDatabase, clearTestData } from './db.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -26,6 +26,17 @@ const io = new Server(server, {
 app.use(cors());
 app.use(express.json({ limit: '25mb' }));
 app.use(express.urlencoded({ extended: true, limit: '25mb' }));
+
+// Endpoint administrativo para resetear la base de datos a cero
+app.post('/api/admin/reset-data', (req, res) => {
+  try {
+    clearTestData();
+    io.emit('data_reset', { message: 'Database reset to clean slate' });
+    res.json({ success: true, message: 'Base de datos en cero: artículos, ventas y abonos eliminados.' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // Settings & Exchange Rate Endpoints
 app.get('/api/settings', (req, res) => {
