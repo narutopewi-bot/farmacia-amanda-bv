@@ -1,0 +1,1103 @@
+import React, { useState, useMemo, useRef } from 'react';
+import { 
+  Package, Plus, Search, Filter, AlertTriangle, 
+  Calendar, ShieldAlert, Edit2, Layers, CheckCircle, X,
+  Upload, Image as ImageIcon, Camera, Trash2, HelpCircle, Sparkles, Check
+} from 'lucide-react';
+import { Product } from '../types';
+
+interface InventoryViewProps {
+  products: Product[];
+  onRefresh: () => void;
+}
+
+const PHARMACY_IMAGE_PRESETS = [
+  { label: 'Pastillas / Blíster', url: 'https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?w=500&auto=format&fit=crop&q=60' },
+  { label: 'Jarabe / Frasco', url: 'https://images.unsplash.com/photo-1587854692152-cbe660dbde88?w=500&auto=format&fit=crop&q=60' },
+  { label: 'Inyectable / Ampolla', url: 'https://images.unsplash.com/photo-1579165466791-78822d31e67e?w=500&auto=format&fit=crop&q=60' },
+  { label: 'Gotas / Gotero', url: 'https://images.unsplash.com/photo-1628771065518-0d82f1938462?w=500&auto=format&fit=crop&q=60' },
+  { label: 'Pomada / Crema', url: 'https://images.unsplash.com/photo-1556228720-195a672e8a03?w=500&auto=format&fit=crop&q=60' },
+  { label: 'Cuidado Personal', url: 'https://images.unsplash.com/photo-1556228722-d0b5be7490bf?w=500&auto=format&fit=crop&q=60' }
+];
+
+export const InventoryView: React.FC<InventoryViewProps> = ({ products, onRefresh }) => {
+  const [search, setSearch] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('ALL');
+  const [stockFilter, setStockFilter] = useState<'ALL' | 'LOW' | 'OUT'>('ALL');
+  
+  // Modal states
+  const [showNewProductModal, setShowNewProductModal] = useState(false);
+  const [showAddBatchModal, setShowAddBatchModal] = useState(false);
+  const [selectedProductForBatch, setSelectedProductForBatch] = useState<Product | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // New Product Form
+  const [formData, setFormData] = useState({
+    code: '',
+    name: '',
+    generic_name: '',
+    category: 'Analgésicos y Antiinflamatorios',
+    presentation: '',
+    laboratory: '',
+    prescription_required: false,
+    cost_price: '',
+    profit_margin: '50',
+    selling_price: '',
+    has_iva: false,
+    iva_percent: 16,
+    min_stock: '5',
+    image_url: '',
+    description: '',
+    warehouse_location: '',
+    batch_number: '',
+    expiry_date: '',
+    initial_stock: ''
+  });
+
+  // Bidirectional Cost, Margin and Price Handlers
+  const handleCostChange = (val: string) => {
+    const cost = parseFloat(val);
+    const margin = parseFloat(formData.profit_margin);
+
+    if (!isNaN(cost) && cost > 0 && !isNaN(margin)) {
+      const calculatedSelling = (cost * (1 + margin / 100)).toFixed(2);
+      setFormData(prev => ({
+        ...prev,
+        cost_price: val,
+        selling_price: calculatedSelling
+      }));
+    } else if (!isNaN(cost) && cost > 0 && formData.selling_price) {
+      const selling = parseFloat(formData.selling_price);
+      if (!isNaN(selling) && selling > 0) {
+        const calculatedMargin = (((selling - cost) / cost) * 100).toFixed(1);
+        setFormData(prev => ({
+          ...prev,
+          cost_price: val,
+          profit_margin: calculatedMargin
+        }));
+      } else {
+        setFormData(prev => ({ ...prev, cost_price: val }));
+      }
+    } else {
+      setFormData(prev => ({ ...prev, cost_price: val }));
+    }
+  };
+
+  const handleMarginChange = (val: string) => {
+    const margin = parseFloat(val);
+    const cost = parseFloat(formData.cost_price);
+
+    if (!isNaN(margin) && !isNaN(cost) && cost > 0) {
+      const calculatedSelling = (cost * (1 + margin / 100)).toFixed(2);
+      setFormData(prev => ({
+        ...prev,
+        profit_margin: val,
+        selling_price: calculatedSelling
+      }));
+    } else {
+      setFormData(prev => ({ ...prev, profit_margin: val }));
+    }
+  };
+
+  const handleSellingPriceChange = (val: string) => {
+    const selling = parseFloat(val);
+    const cost = parseFloat(formData.cost_price);
+
+    if (!isNaN(selling) && !isNaN(cost) && cost > 0) {
+      const calculatedMargin = (((selling - cost) / cost) * 100).toFixed(1);
+      setFormData(prev => ({
+        ...prev,
+        selling_price: val,
+        profit_margin: calculatedMargin
+      }));
+    } else {
+      setFormData(prev => ({ ...prev, selling_price: val }));
+    }
+  };
+
+  const applyPresetMargin = (pct: number) => {
+    const cost = parseFloat(formData.cost_price);
+    const marginStr = pct.toString();
+    if (!isNaN(cost) && cost > 0) {
+      const calculatedSelling = (cost * (1 + pct / 100)).toFixed(2);
+      setFormData(prev => ({
+        ...prev,
+        profit_margin: marginStr,
+        selling_price: calculatedSelling
+      }));
+    } else {
+      setFormData(prev => ({ ...prev, profit_margin: marginStr }));
+    }
+  };
+
+  // New Batch Form
+  const [batchData, setBatchData] = useState({
+    batch_number: '',
+    expiry_date: '',
+    stock: '',
+    cost_price: ''
+  });
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      alert('Por favor selecciona una imagen válida (JPG, PNG o WEBP)');
+      return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      alert('La imagen no debe superar los 8MB');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      setFormData(prev => ({ ...prev, image_url: reader.result as string }));
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const categories = useMemo(() => {
+    return ['ALL', ...Array.from(new Set(products.map(p => p.category))).filter(Boolean)];
+  }, [products]);
+
+  const filtered = useMemo(() => {
+    return products.filter(p => {
+      const matchSearch = 
+        p.name.toLowerCase().includes(search.toLowerCase()) ||
+        p.generic_name.toLowerCase().includes(search.toLowerCase()) ||
+        p.code.toLowerCase().includes(search.toLowerCase()) ||
+        p.laboratory.toLowerCase().includes(search.toLowerCase());
+
+      const matchCat = categoryFilter === 'ALL' || p.category === categoryFilter;
+
+      let matchStock = true;
+      if (stockFilter === 'LOW') matchStock = p.total_stock > 0 && p.total_stock <= p.min_stock;
+      if (stockFilter === 'OUT') matchStock = p.total_stock <= 0;
+
+      return matchSearch && matchCat && matchStock;
+    });
+  }, [products, search, categoryFilter, stockFilter]);
+
+  const handleCreateProduct = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const payload = {
+        code: formData.code,
+        name: formData.name,
+        generic_name: formData.generic_name,
+        category: formData.category,
+        presentation: formData.presentation,
+        laboratory: formData.laboratory,
+        prescription_required: formData.prescription_required,
+        cost_price: Number(formData.cost_price),
+        profit_margin: Number(formData.profit_margin) || 0,
+        selling_price: Number(formData.selling_price),
+        has_iva: formData.has_iva ? 1 : 0,
+        iva_percent: formData.has_iva ? 16.0 : 0.0,
+        min_stock: Number(formData.min_stock),
+        image_url: formData.image_url,
+        description: formData.description,
+        warehouse_location: formData.warehouse_location,
+        initial_batch: formData.batch_number ? {
+          batch_number: formData.batch_number,
+          expiry_date: formData.expiry_date,
+          stock: Number(formData.initial_stock)
+        } : null
+      };
+
+      const res = await fetch('/api/products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Error al crear producto');
+      }
+
+      setShowNewProductModal(false);
+      onRefresh();
+      // Reset form
+      setFormData({
+        code: '', name: '', generic_name: '', category: 'Analgésicos y Antiinflamatorios',
+        presentation: '', laboratory: '', prescription_required: false,
+        cost_price: '', profit_margin: '50', selling_price: '', has_iva: false, iva_percent: 16, min_stock: '5', image_url: '',
+        description: '', warehouse_location: '', batch_number: '', expiry_date: '', initial_stock: ''
+      });
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  const handleAddBatch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedProductForBatch) return;
+
+    try {
+      const payload = {
+        product_id: selectedProductForBatch.id,
+        batch_number: batchData.batch_number,
+        expiry_date: batchData.expiry_date,
+        stock: Number(batchData.stock),
+        cost_price: Number(batchData.cost_price || selectedProductForBatch.cost_price)
+      };
+
+      const res = await fetch('/api/batches', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Error al agregar lote');
+      }
+
+      setShowAddBatchModal(false);
+      setSelectedProductForBatch(null);
+      setBatchData({ batch_number: '', expiry_date: '', stock: '', cost_price: '' });
+      onRefresh();
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  const totalUnits = products.reduce((acc, p) => acc + p.total_stock, 0);
+  const lowStockCount = products.filter(p => p.total_stock > 0 && p.total_stock <= p.min_stock).length;
+  const outOfStockCount = products.filter(p => p.total_stock <= 0).length;
+
+  return (
+    <div className="space-y-5">
+      
+      {/* Top Stats Bar */}
+      <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+        <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800 shadow-md flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-emerald-950/60 border border-emerald-800/60 text-emerald-400 flex items-center justify-center font-bold">
+            <Package className="w-5 h-5" />
+          </div>
+          <div>
+            <p className="text-xs text-slate-400 font-medium">Medicamentos Registrados</p>
+            <p className="text-xl font-extrabold text-white">{products.length}</p>
+          </div>
+        </div>
+
+        <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800 shadow-md flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-teal-950/60 border border-teal-800/60 text-teal-400 flex items-center justify-center font-bold">
+            <Layers className="w-5 h-5" />
+          </div>
+          <div>
+            <p className="text-xs text-slate-400 font-medium">Unidades en Inventario</p>
+            <p className="text-xl font-extrabold text-white">{totalUnits}</p>
+          </div>
+        </div>
+
+        <div 
+          onClick={() => setStockFilter(stockFilter === 'LOW' ? 'ALL' : 'LOW')}
+          className={`p-4 rounded-2xl border shadow-md flex items-center gap-3 cursor-pointer transition ${
+            stockFilter === 'LOW' 
+              ? 'bg-amber-950/50 border-amber-500/60 text-amber-200' 
+              : 'bg-slate-900 border-slate-800 hover:border-amber-500/40 text-slate-300'
+          }`}
+        >
+          <div className="w-10 h-10 rounded-xl bg-amber-900/40 border border-amber-800/40 text-amber-400 flex items-center justify-center font-bold">
+            <AlertTriangle className="w-5 h-5" />
+          </div>
+          <div>
+            <p className="text-xs text-slate-400 font-medium">Stock Mínimo / Bajo</p>
+            <p className="text-xl font-extrabold text-amber-400">{lowStockCount}</p>
+          </div>
+        </div>
+
+        <div 
+          onClick={() => setStockFilter(stockFilter === 'OUT' ? 'ALL' : 'OUT')}
+          className={`p-4 rounded-2xl border shadow-md flex items-center gap-3 cursor-pointer transition ${
+            stockFilter === 'OUT' 
+              ? 'bg-red-950/50 border-red-500/60 text-red-200' 
+              : 'bg-slate-900 border-slate-800 hover:border-red-500/40 text-slate-300'
+          }`}
+        >
+          <div className="w-10 h-10 rounded-xl bg-red-900/40 border border-red-800/40 text-red-400 flex items-center justify-center font-bold">
+            <AlertTriangle className="w-5 h-5" />
+          </div>
+          <div>
+            <p className="text-xs text-slate-400 font-medium">Productos Agotados</p>
+            <p className="text-xl font-extrabold text-red-400">{outOfStockCount}</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Action and Search Bar */}
+      <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800 shadow-md flex flex-col md:flex-row gap-3 items-center justify-between">
+        
+        {/* Search */}
+        <div className="relative w-full md:w-96">
+          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <input
+            type="text"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Buscar por nombre, principio activo, código o laboratorio..."
+            className="w-full pl-9 pr-3 py-2 text-xs bg-[#0f172a] border border-slate-700 text-white placeholder-slate-500 rounded-xl focus:ring-1 focus:ring-emerald-500"
+          />
+        </div>
+
+        {/* Filters and Add button */}
+        <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+          <select
+            value={categoryFilter}
+            onChange={e => setCategoryFilter(e.target.value)}
+            className="text-xs bg-[#0f172a] border border-slate-700 rounded-xl px-3 py-2 text-white font-medium"
+          >
+            {categories.map(c => (
+              <option key={c} value={c}>{c === 'ALL' ? 'Todas las Categorías' : c}</option>
+            ))}
+          </select>
+
+          <button
+            onClick={() => setShowNewProductModal(true)}
+            className="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs py-2 px-4 rounded-xl flex items-center gap-1.5 shadow-md shadow-emerald-700/20 transition active:scale-98 cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Nuevo Medicamento</span>
+          </button>
+        </div>
+
+      </div>
+
+      {/* Inventory Table */}
+      <div className="bg-slate-900 rounded-2xl border border-slate-800 shadow-md overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs">
+            <thead className="bg-slate-800/80 border-b border-slate-800 text-slate-300 font-bold uppercase tracking-wider text-[10px]">
+              <tr>
+                <th className="py-3 px-4">Código</th>
+                <th className="py-3 px-4">Medicamento / Principio Activo</th>
+                <th className="py-3 px-4">Categoría & Presentación</th>
+                <th className="py-3 px-4">Laboratorio</th>
+                <th className="py-3 px-4 text-center">Ubicación</th>
+                <th className="py-3 px-4 text-right">Costo</th>
+                <th className="py-3 px-4 text-right">PVP Venta</th>
+                <th className="py-3 px-4 text-center">Stock Total</th>
+                <th className="py-3 px-4">Lotes & Vencimiento</th>
+                <th className="py-3 px-4 text-center">Acción</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-800">
+              {filtered.map(product => {
+                const isOutOfStock = product.total_stock <= 0;
+                const isLowStock = product.total_stock > 0 && product.total_stock <= product.min_stock;
+
+                return (
+                  <tr key={product.id} className="hover:bg-slate-800/40 transition">
+                    <td className="py-3 px-4 font-mono font-semibold text-slate-400">
+                      {product.code}
+                    </td>
+                    <td className="py-3 px-4">
+                      <div className="flex items-center gap-2.5">
+                        {product.image_url && (
+                          <img
+                            src={product.image_url}
+                            alt={product.name}
+                            className="w-9 h-9 rounded-lg object-cover border border-slate-700 shrink-0 bg-slate-800"
+                            onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
+                          />
+                        )}
+                        <div>
+                          <div className="font-bold text-white flex items-center gap-1.5">
+                            {product.name}
+                            {product.prescription_required === 1 && (
+                              <span className="text-[9px] bg-amber-950/60 border border-amber-800/60 text-amber-300 font-bold px-1.5 py-0.2 rounded" title="Requiere Receta">
+                                Rx
+                              </span>
+                            )}
+                          </div>
+                          {product.generic_name && (
+                            <div className="text-[11px] text-slate-400 italic">
+                              {product.generic_name}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </td>
+                    <td className="py-3 px-4">
+                      <span className="inline-block bg-slate-800 text-slate-300 border border-slate-700/60 font-medium px-2 py-0.5 rounded-md text-[11px]">
+                        {product.category}
+                      </span>
+                      <div className="text-[10px] text-slate-400 mt-0.5">
+                        {product.presentation}
+                      </div>
+                    </td>
+                    <td className="py-3 px-4 font-medium text-slate-300">
+                      {product.laboratory || '-'}
+                    </td>
+                    <td className="py-3 px-4 text-center text-slate-400 font-medium">
+                      {product.warehouse_location || 'Estante'}
+                    </td>
+                    <td className="py-3 px-4 text-right text-slate-400 font-mono">
+                      ${Number(product.cost_price).toFixed(2)}
+                    </td>
+                    <td className="py-3 px-4 text-right">
+                      <div className="font-extrabold text-white font-mono">
+                        ${Number(product.selling_price).toFixed(2)}
+                      </div>
+                      <div className="flex items-center justify-end gap-1 mt-0.5">
+                        {Number(product.cost_price) > 0 && Number(product.selling_price) > Number(product.cost_price) ? (
+                          <span 
+                            className="inline-block text-[9px] font-bold px-1.5 py-0.2 rounded bg-emerald-950/60 text-emerald-400 border border-emerald-800/60 font-mono" 
+                            title={`Ganancia: +$${(Number(product.selling_price) - Number(product.cost_price)).toFixed(2)}`}
+                          >
+                            +{(((Number(product.selling_price) - Number(product.cost_price)) / Number(product.cost_price)) * 100).toFixed(0)}%
+                          </span>
+                        ) : null}
+                        {product.has_iva === 1 ? (
+                          <span className="inline-block text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-950/60 text-amber-300 border border-amber-800/60">
+                            +IVA 16%
+                          </span>
+                        ) : (
+                          <span className="inline-block text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-950/60 text-emerald-400 border border-emerald-800/60">
+                            Exento
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="py-3 px-4 text-center">
+                      <span
+                        className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold ${
+                          isOutOfStock
+                            ? 'bg-red-950/60 text-red-400 border border-red-800/60'
+                            : isLowStock
+                            ? 'bg-amber-950/60 text-amber-300 border border-amber-800/60'
+                            : 'bg-emerald-950/60 text-emerald-400 border border-emerald-800/60'
+                        }`}
+                      >
+                        {product.total_stock} und
+                      </span>
+                    </td>
+                    <td className="py-3 px-4">
+                      {product.batches && product.batches.length > 0 ? (
+                        <div className="space-y-1">
+                          {product.batches.map(b => (
+                            <div key={b.id} className="text-[10px] flex items-center gap-1 text-slate-300 font-mono">
+                              <span className="font-semibold text-slate-200">{b.batch_number}:</span>
+                              <span className="text-emerald-400">{b.stock} und</span>
+                              <span className="text-slate-400">(Vence: {b.expiry_date})</span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-[11px] text-slate-500">Sin lotes activos</span>
+                      )}
+                    </td>
+                    <td className="py-3 px-4 text-center">
+                      <button
+                        onClick={() => {
+                          setSelectedProductForBatch(product);
+                          setShowAddBatchModal(true);
+                        }}
+                        className="text-slate-200 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 font-semibold px-2.5 py-1 rounded-lg transition text-[11px] flex items-center gap-1 mx-auto cursor-pointer"
+                        title="Ingresar nuevo lote a este medicamento"
+                      >
+                        <Plus className="w-3 h-3 text-emerald-400" />
+                        <span>+ Lote</span>
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Modal: Crear Nuevo Medicamento */}
+      {showNewProductModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-xs p-2 sm:p-4 overflow-y-auto">
+          <div className="bg-slate-900 rounded-2xl shadow-2xl max-w-2xl w-full p-4 sm:p-6 border border-slate-800 text-white animate-in fade-in zoom-in-95 duration-200 max-h-[94vh] flex flex-col">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800 shrink-0">
+              <div className="flex items-center gap-2">
+                <Package className="w-5 h-5 text-emerald-400" />
+                <div>
+                  <h3 className="font-bold text-white text-sm sm:text-base">Registrar Nuevo Medicamento</h3>
+                  <p className="text-[11px] text-slate-400">Ingresa los datos para el catálogo interno y la tienda online.</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setShowNewProductModal(false)} 
+                className="text-slate-400 hover:text-white p-1 rounded-lg cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateProduct} className="space-y-4 mt-3 text-xs overflow-y-auto flex-1 pr-1">
+              
+              {/* Código de barras y Nombre comercial */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="font-bold text-slate-200">Código de Barras *</label>
+                  </div>
+                  <input
+                    type="text"
+                    required
+                    value={formData.code}
+                    onChange={e => setFormData({ ...formData, code: e.target.value })}
+                    placeholder="Ej: 7591001099"
+                    className="w-full p-2 bg-[#0f172a] border border-slate-700 text-white placeholder-slate-500 rounded-lg focus:ring-2 focus:ring-emerald-500 font-mono text-xs"
+                  />
+                  <span className="text-[10px] text-slate-400 mt-0.5 block">
+                    Escanea con pistola láser o escribe el código.
+                  </span>
+                </div>
+                <div className="sm:col-span-2">
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="font-bold text-slate-200">Nombre Comercial (Marca) *</label>
+                  </div>
+                  <input
+                    type="text"
+                    required
+                    value={formData.name}
+                    onChange={e => setFormData({ ...formData, name: e.target.value })}
+                    placeholder="Ej: Atamel Forte 650mg / Brugesic 400mg"
+                    className="w-full p-2 bg-[#0f172a] border border-slate-700 text-white placeholder-slate-500 rounded-lg focus:ring-2 focus:ring-emerald-500 text-xs font-semibold"
+                  />
+                  <span className="text-[10px] text-slate-400 mt-0.5 block">
+                    El nombre de marca que viene en la caja.
+                  </span>
+                </div>
+              </div>
+
+              {/* Principio Activo y Categoría */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="bg-emerald-950/40 p-2.5 rounded-xl border border-emerald-800/60">
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <label className="font-extrabold text-emerald-300">Principio Activo</label>
+                    <span className="text-[9px] bg-emerald-900/80 text-emerald-200 border border-emerald-700/60 font-black px-1.5 py-0.2 rounded">
+                      Fórmula Médica
+                    </span>
+                  </div>
+                  <input
+                    type="text"
+                    value={formData.generic_name}
+                    onChange={e => setFormData({ ...formData, generic_name: e.target.value })}
+                    placeholder="Ej: Acetaminofén / Ibuprofeno / Amoxicilina"
+                    className="w-full p-2 bg-[#0f172a] border border-emerald-700/70 text-white placeholder-slate-500 rounded-lg text-xs font-medium focus:ring-2 focus:ring-emerald-500"
+                  />
+                  <span className="text-[10px] text-emerald-400/80 mt-1 block">
+                    Componente químico curativo para búsquedas y sustitutos.
+                  </span>
+                </div>
+
+                <div>
+                  <label className="font-bold text-slate-200 block mb-1">Categoría *</label>
+                  <select
+                    value={formData.category}
+                    onChange={e => setFormData({ ...formData, category: e.target.value })}
+                    className="w-full p-2 bg-[#0f172a] border border-slate-700 text-white rounded-lg text-xs"
+                  >
+                    <option value="Analgésicos y Antiinflamatorios">Analgésicos y Antiinflamatorios</option>
+                    <option value="Antibióticos">Antibióticos</option>
+                    <option value="Cardiovascular y Presión Arterial">Cardiovascular y Presión Arterial</option>
+                    <option value="Diabetes y Endocrinología">Diabetes y Endocrinología</option>
+                    <option value="Antialérgicos y Antihistamínicos">Antialérgicos y Antihistamínicos</option>
+                    <option value="Gastrointestinal">Gastrointestinal</option>
+                    <option value="Pediatría y Nutrición">Pediatría y Nutrición</option>
+                    <option value="Vitaminas y Suplementos">Vitaminas y Suplementos</option>
+                    <option value="Material Médico y Desinfección">Material Médico y Desinfección</option>
+                    <option value="Cuidado Personal">Cuidado Personal</option>
+                  </select>
+                  <span className="text-[10px] text-slate-400 mt-0.5 block">
+                    Sección en la tienda online y reportes.
+                  </span>
+                </div>
+              </div>
+
+              {/* Presentación, Laboratorio y Ubicación */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="font-bold text-slate-200 block mb-1">Presentación</label>
+                  <input
+                    type="text"
+                    value={formData.presentation}
+                    onChange={e => setFormData({ ...formData, presentation: e.target.value })}
+                    placeholder="Ej: Caja x 20 Tabletas / Jarabe 120ml"
+                    className="w-full p-2 bg-[#0f172a] border border-slate-700 text-white placeholder-slate-500 rounded-lg text-xs"
+                  />
+                  <span className="text-[10px] text-slate-400 mt-0.5 block">
+                    Forma farmacéutica y contenido.
+                  </span>
+                </div>
+                <div>
+                  <label className="font-bold text-slate-200 block mb-1">Laboratorio / Fabricante</label>
+                  <input
+                    type="text"
+                    value={formData.laboratory}
+                    onChange={e => setFormData({ ...formData, laboratory: e.target.value })}
+                    placeholder="Ej: Calox / Genfar / Bayer"
+                    className="w-full p-2 bg-[#0f172a] border border-slate-700 text-white placeholder-slate-500 rounded-lg text-xs"
+                  />
+                  <span className="text-[10px] text-slate-400 mt-0.5 block">
+                    Droguería fabricante del lote.
+                  </span>
+                </div>
+                <div>
+                  <label className="font-bold text-slate-200 block mb-1">Ubicación en Depósito</label>
+                  <input
+                    type="text"
+                    value={formData.warehouse_location}
+                    onChange={e => setFormData({ ...formData, warehouse_location: e.target.value })}
+                    placeholder="Ej: Estante B - Tramo 2 / Nevera"
+                    className="w-full p-2 bg-[#0f172a] border border-slate-700 text-white placeholder-slate-500 rounded-lg text-xs"
+                  />
+                  <span className="text-[10px] text-slate-400 mt-0.5 block">
+                    Dónde encontrarlo en la farmacia.
+                  </span>
+                </div>
+              </div>
+
+              {/* Estructura de Precios, Margen de Ganancia y PVP */}
+              <div className="bg-[#0f172a] p-4 rounded-2xl border border-slate-800 space-y-3.5 shadow-md">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
+                  <div>
+                    <label className="font-extrabold text-white block text-xs flex items-center gap-1.5">
+                      <span className="text-emerald-400">💰</span>
+                      <span>Estructura de Costos, Margen y Precio de Venta</span>
+                    </label>
+                    <span className="text-[11px] text-slate-400">
+                      Cálculo bidireccional: escribe el margen (%) para calcular el PVP, o escribe el PVP para calcular el margen.
+                    </span>
+                  </div>
+                  {Number(formData.cost_price) > 0 && Number(formData.selling_price) > 0 && (
+                    <div className="flex items-center gap-2 bg-slate-900 px-3 py-1 rounded-xl border border-emerald-600/40 shadow-xs self-start sm:self-auto">
+                      <span className="text-[10px] uppercase font-black text-slate-400">Ganancia Neta:</span>
+                      <strong className="text-xs font-black text-emerald-400 font-mono">
+                        +${(Number(formData.selling_price) - Number(formData.cost_price)).toFixed(2)}
+                      </strong>
+                      <span className="text-[10px] font-bold text-emerald-300 bg-emerald-950/80 border border-emerald-800/80 px-1.5 py-0.5 rounded font-mono">
+                        +{formData.profit_margin || '0'}%
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {/* 1. Costo Unitario */}
+                  <div className="bg-slate-900 p-3 rounded-xl border border-slate-800 shadow-xs">
+                    <label className="font-bold text-slate-300 block text-xs mb-1">
+                      1. Costo Proveedor ($)
+                    </label>
+                    <div className="relative">
+                      <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500 font-bold text-xs">$</span>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={formData.cost_price}
+                        onChange={e => handleCostChange(e.target.value)}
+                        placeholder="100.00"
+                        className="w-full pl-6 pr-2 py-2 bg-[#0f172a] border border-slate-700 text-white rounded-lg font-mono font-bold text-xs focus:ring-2 focus:ring-emerald-500 transition"
+                      />
+                    </div>
+                    <span className="text-[10px] text-slate-400 mt-1 block">Lo que pagas a droguería.</span>
+                  </div>
+
+                  {/* 2. Margen de Ganancia (%) */}
+                  <div className="bg-slate-900 p-3 rounded-xl border border-emerald-600/40 shadow-xs">
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="font-extrabold text-emerald-400 block text-xs">
+                        2. Margen Ganancia (%)
+                      </label>
+                      <span className="text-[9px] font-black uppercase text-emerald-300 bg-emerald-950/80 border border-emerald-800/60 px-1.5 py-0.2 rounded">
+                        Auto
+                      </span>
+                    </div>
+                    <div className="relative">
+                      <input
+                        type="number"
+                        step="0.5"
+                        value={formData.profit_margin}
+                        onChange={e => handleMarginChange(e.target.value)}
+                        placeholder="50"
+                        className="w-full pr-7 pl-2.5 py-2 bg-[#0f172a] border border-emerald-600/50 rounded-lg font-mono font-black text-xs text-emerald-400 focus:ring-2 focus:ring-emerald-500 transition"
+                      />
+                      <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-emerald-400 font-black text-xs">%</span>
+                    </div>
+
+                    {/* Presets rápidos */}
+                    <div className="flex items-center gap-1 mt-1.5 overflow-x-auto">
+                      <span className="text-[9px] text-slate-400 font-semibold mr-0.5">Rápido:</span>
+                      {[25, 30, 40, 50, 70, 100].map(pct => (
+                        <button
+                          key={pct}
+                          type="button"
+                          onClick={() => applyPresetMargin(pct)}
+                          className={`text-[9px] px-1.5 py-0.5 rounded font-bold transition cursor-pointer ${
+                            formData.profit_margin === pct.toString()
+                              ? 'bg-emerald-600 text-white'
+                              : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+                          }`}
+                        >
+                          {pct}%
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* 3. PVP Base Venta ($) */}
+                  <div className="bg-slate-900 p-3 rounded-xl border border-slate-800 shadow-xs">
+                    <label className="font-bold text-slate-300 block text-xs mb-1">
+                      3. PVP Base Venta ($) *
+                    </label>
+                    <div className="relative">
+                      <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500 font-bold text-xs">$</span>
+                      <input
+                        type="number"
+                        step="0.01"
+                        required
+                        value={formData.selling_price}
+                        onChange={e => handleSellingPriceChange(e.target.value)}
+                        placeholder="150.00"
+                        className="w-full pl-6 pr-2 py-2 bg-[#0f172a] border border-slate-700 text-white font-mono font-black text-xs focus:ring-2 focus:ring-emerald-500 transition"
+                      />
+                    </div>
+                    <span className="text-[10px] text-slate-400 mt-1 block">Precio base al cliente.</span>
+                  </div>
+                </div>
+
+                {/* Stock Mínimo y Control Rx */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1 border-t border-slate-800">
+                  <div className="flex items-center gap-3">
+                    <div className="w-32">
+                      <label className="font-bold text-slate-300 block text-[11px] mb-0.5">Stock Mínimo Alerta</label>
+                      <input
+                        type="number"
+                        value={formData.min_stock}
+                        onChange={e => setFormData({ ...formData, min_stock: e.target.value })}
+                        placeholder="5"
+                        className="w-full p-1.5 bg-slate-900 border border-slate-700 text-white rounded-lg text-xs font-bold font-mono"
+                      />
+                    </div>
+                    <span className="text-[10px] text-slate-400 pt-3">
+                      Avisa cuando queden pocas unidades.
+                    </span>
+                  </div>
+
+                  <div className="flex items-center pt-2 sm:pt-4">
+                    <label className="flex items-center gap-2 cursor-pointer font-semibold text-slate-300">
+                      <input
+                        type="checkbox"
+                        checked={formData.prescription_required}
+                        onChange={e => setFormData({ ...formData, prescription_required: e.target.checked })}
+                        className="w-4 h-4 text-emerald-600 rounded bg-slate-900 border-slate-700 cursor-pointer"
+                      />
+                      <div>
+                        <span className="text-xs block font-bold text-white">Requiere Receta Médica (Rx)</span>
+                        <span className="text-[10px] text-slate-400 font-normal">Medicamento psicotrópico o controlado</span>
+                      </div>
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              {/* Tarjeta de IVA (16% Opcional) */}
+              <div className={`p-3.5 rounded-xl border transition-all ${
+                formData.has_iva ? 'bg-amber-950/30 border-amber-800/60 shadow-xs' : 'bg-[#0f172a] border-slate-800'
+              }`}>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <label className="flex items-center gap-2.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={formData.has_iva}
+                      onChange={e => setFormData({ ...formData, has_iva: e.target.checked })}
+                      className="w-5 h-5 text-emerald-600 rounded cursor-pointer bg-slate-900 border-slate-700"
+                    />
+                    <div>
+                      <span className="font-extrabold text-xs text-white block">
+                        Aplica IVA del 16% (Opcional)
+                      </span>
+                      <span className="text-[11px] text-slate-400 font-medium">
+                        {formData.has_iva 
+                          ? 'Este producto pagará 16% de IVA (típico en cuidado personal, cosméticos, golosinas o suplementos).' 
+                          : 'Producto Exento de IVA (Tasa 0% - Ley de Medicamentos Esenciales del SENIAT).'}
+                      </span>
+                    </div>
+                  </label>
+                  <span className={`text-[10px] font-black uppercase px-2.5 py-1 rounded-full shrink-0 ${
+                    formData.has_iva ? 'bg-amber-950/60 text-amber-300 border border-amber-800/80' : 'bg-emerald-950/60 text-emerald-400 border border-emerald-800/80'
+                  }`}>
+                    {formData.has_iva ? 'Gravado (IVA 16%)' : 'Exento (IVA 0%)'}
+                  </span>
+                </div>
+
+                {/* Calculation preview */}
+                {formData.has_iva && Number(formData.selling_price) > 0 && (
+                  <div className="mt-3 pt-2.5 border-t border-amber-800/60 flex flex-wrap items-center justify-between gap-2 text-xs font-semibold text-slate-300">
+                    <span>Base Imponible: <strong className="text-white">${Number(formData.selling_price).toFixed(2)}</strong></span>
+                    <span>+ IVA (16%): <strong className="text-amber-400">${(Number(formData.selling_price) * 0.16).toFixed(2)}</strong></span>
+                    <span className="font-black text-emerald-400 bg-slate-900 px-2.5 py-1 rounded-lg border border-emerald-800/60 shadow-xs">
+                      PVP Final con IVA: ${(Number(formData.selling_price) * 1.16).toFixed(2)}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Initial Batch Section */}
+              <div className="bg-[#0f172a] p-3 rounded-xl border border-slate-800 space-y-2">
+                <p className="font-bold text-slate-300 text-[11px]">Lote Inicial de Entrada (Opcional):</p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <div>
+                    <input
+                      type="text"
+                      value={formData.batch_number}
+                      onChange={e => setFormData({ ...formData, batch_number: e.target.value })}
+                      placeholder="Número de Lote (Ej: LT-902)"
+                      className="w-full p-1.5 bg-slate-900 border border-slate-700 text-white rounded-lg text-xs"
+                    />
+                  </div>
+                  <div>
+                    <input
+                      type="date"
+                      value={formData.expiry_date}
+                      onChange={e => setFormData({ ...formData, expiry_date: e.target.value })}
+                      className="w-full p-1.5 bg-slate-900 border border-slate-700 text-white rounded-lg text-xs"
+                    />
+                  </div>
+                  <div>
+                    <input
+                      type="number"
+                      value={formData.initial_stock}
+                      onChange={e => setFormData({ ...formData, initial_stock: e.target.value })}
+                      placeholder="Cantidad inicial"
+                      className="w-full p-1.5 bg-slate-900 border border-slate-700 text-white rounded-lg text-xs font-bold"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Imagen para la Tienda Online y POS */}
+              <div className="bg-[#0f172a] p-3.5 rounded-xl border border-slate-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <label className="font-bold text-white block text-xs">
+                      Foto del Medicamento (Para la Tienda Online y POS)
+                    </label>
+                    <span className="text-[11px] text-slate-400">
+                      Esta misma imagen se mostrará a tus clientes en la web y en la pantalla de cobro.
+                    </span>
+                  </div>
+                </div>
+
+                {/* Hidden file input */}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleImageUpload}
+                  className="hidden"
+                />
+
+                {/* Action Buttons to select or upload */}
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 shadow-md transition active:scale-95 cursor-pointer"
+                  >
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>Subir Foto desde Celular o PC</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl flex items-center gap-1.5 transition active:scale-95 cursor-pointer sm:hidden"
+                  >
+                    <Camera className="w-3.5 h-3.5" />
+                    <span>Tomar Foto</span>
+                  </button>
+                </div>
+
+                {/* Live Preview Card if image is set */}
+                {formData.image_url ? (
+                  <div className="p-3 bg-slate-900 rounded-xl border border-emerald-800/60 flex items-center justify-between gap-3 animate-in fade-in duration-150">
+                    <div className="flex items-center gap-3">
+                      <div className="w-16 h-16 rounded-xl overflow-hidden border border-slate-700 bg-slate-800 shrink-0">
+                        <img 
+                          src={formData.image_url} 
+                          alt="Vista previa" 
+                          className="w-full h-full object-cover" 
+                        />
+                      </div>
+                      <div>
+                        <span className="text-xs font-bold text-emerald-400 flex items-center gap-1">
+                          <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />
+                          Imagen Lista y Vinculada
+                        </span>
+                        <p className="text-[10px] text-slate-400 mt-0.5">
+                          Se verá en el catálogo web y al momento de cobrar.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold rounded-lg text-[11px] transition cursor-pointer"
+                      >
+                        Cambiar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setFormData(prev => ({ ...prev, image_url: '' }))}
+                        className="p-1.5 text-red-400 hover:bg-red-950/60 rounded-lg transition cursor-pointer"
+                        title="Eliminar foto"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-3 bg-slate-900 rounded-xl border border-dashed border-slate-700 text-center space-y-2">
+                    <div className="flex items-center justify-center gap-2 text-slate-400">
+                      <ImageIcon className="w-5 h-5" />
+                      <span className="text-[11px] font-medium">¿No tienes foto a mano? Elige un diseño rápido:</span>
+                    </div>
+                    <div className="flex flex-wrap items-center justify-center gap-1.5">
+                      {PHARMACY_IMAGE_PRESETS.map((p, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => setFormData(prev => ({ ...prev, image_url: p.url }))}
+                          className="px-2 py-1 bg-slate-800 hover:bg-emerald-950/80 hover:text-emerald-300 text-slate-300 text-[10px] font-semibold rounded-lg border border-slate-700 transition cursor-pointer"
+                        >
+                          + {p.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Fallback URL input */}
+                <div>
+                  <label className="text-[10px] font-semibold text-slate-400 block mb-1">
+                    O pega un enlace web directo de imagen:
+                  </label>
+                  <input
+                    type="url"
+                    value={formData.image_url}
+                    onChange={e => setFormData({ ...formData, image_url: e.target.value })}
+                    placeholder="https://images.unsplash.com/..."
+                    className="w-full p-2 bg-slate-900 border border-slate-700 text-white placeholder-slate-500 rounded-lg text-xs"
+                  />
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="pt-3 border-t border-slate-800 flex justify-end gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setShowNewProductModal(false)}
+                  className="px-4 py-2 border border-slate-700 rounded-xl text-slate-300 font-medium hover:bg-slate-800 cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl shadow-md cursor-pointer active:scale-98 transition"
+                >
+                  Guardar Medicamento
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Agregar Lote a Medicamento Existente */}
+      {showAddBatchModal && selectedProductForBatch && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-xs p-4">
+          <div className="bg-slate-900 rounded-2xl shadow-2xl max-w-md w-full p-6 border border-slate-800 text-white">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div>
+                <h3 className="font-bold text-white">Nuevo Lote de Medicamento</h3>
+                <p className="text-xs text-emerald-400 font-semibold">{selectedProductForBatch.name}</p>
+              </div>
+              <button onClick={() => setShowAddBatchModal(false)} className="text-slate-400 hover:text-white cursor-pointer">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleAddBatch} className="space-y-3 mt-4 text-xs">
+              <div>
+                <label className="font-semibold text-slate-300 block mb-1">Número de Lote *</label>
+                <input
+                  type="text"
+                  required
+                  value={batchData.batch_number}
+                  onChange={e => setBatchData({ ...batchData, batch_number: e.target.value })}
+                  placeholder="Ej: LT-2026-X8"
+                  className="w-full p-2 bg-[#0f172a] border border-slate-700 text-white rounded-lg font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="font-semibold text-slate-300 block mb-1">Fecha de Expiración / Vencimiento *</label>
+                <input
+                  type="date"
+                  required
+                  value={batchData.expiry_date}
+                  onChange={e => setBatchData({ ...batchData, expiry_date: e.target.value })}
+                  className="w-full p-2 bg-[#0f172a] border border-slate-700 text-white rounded-lg"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="font-semibold text-slate-300 block mb-1">Cantidad a Ingresar *</label>
+                  <input
+                    type="number"
+                    required
+                    min="1"
+                    value={batchData.stock}
+                    onChange={e => setBatchData({ ...batchData, stock: e.target.value })}
+                    placeholder="Ej: 50"
+                    className="w-full p-2 bg-[#0f172a] border border-slate-700 text-white rounded-lg font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="font-semibold text-slate-300 block mb-1">Costo Unitario ($)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={batchData.cost_price}
+                    onChange={e => setBatchData({ ...batchData, cost_price: e.target.value })}
+                    placeholder={selectedProductForBatch.cost_price.toString()}
+                    className="w-full p-2 bg-[#0f172a] border border-slate-700 text-white rounded-lg font-mono"
+                  />
+                </div>
+              </div>
+
+              <div className="pt-3 border-t border-slate-800 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAddBatchModal(false)}
+                  className="px-4 py-2 border border-slate-700 rounded-xl text-slate-300 font-medium hover:bg-slate-800 cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-xl cursor-pointer"
+                >
+                  Ingresar Stock de Lote
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+    </div>
+  );
+};
