@@ -1,3 +1,11 @@
+export interface Category {
+  id: number;
+  name: string;
+  description?: string;
+  product_count?: number;
+  created_at?: string;
+}
+
 export interface Batch {
   id: number;
   product_id: number;

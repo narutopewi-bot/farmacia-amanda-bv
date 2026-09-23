@@ -255,6 +255,139 @@ function getProductWithStock(id) {
 }
 
 // ==========================================
+// CATEGORÍAS DE MEDICAMENTOS Y PRODUCTOS
+// ==========================================
+app.get('/api/categories', (req, res) => {
+  try {
+    const categories = db.prepare(`
+      SELECT 
+        c.*, 
+        (SELECT COUNT(*) FROM products p WHERE p.category = c.name) as product_count
+      FROM categories c
+      ORDER BY c.name ASC
+    `).all();
+    res.json(categories);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/categories', (req, res) => {
+  try {
+    const { name, description } = req.body;
+    if (!name || !name.trim()) {
+      return res.status(400).json({ error: 'El nombre de la categoría es obligatorio.' });
+    }
+
+    const cleanName = name.trim();
+    const existing = db.prepare('SELECT id FROM categories WHERE LOWER(name) = LOWER(?)').get(cleanName);
+    if (existing) {
+      return res.status(400).json({ error: 'Ya existe una categoría con ese nombre.' });
+    }
+
+    const result = db.prepare(`
+      INSERT INTO categories (name, description)
+      VALUES (?, ?)
+    `).run(cleanName, (description || '').trim());
+
+    const created = db.prepare(`
+      SELECT c.*, 0 as product_count FROM categories c WHERE c.id = ?
+    `).get(result.lastInsertRowid);
+
+    io.emit('categories_updated', { action: 'create', category: created });
+    res.status(201).json(created);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/categories/:id', (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, description } = req.body;
+
+    if (!name || !name.trim()) {
+      return res.status(400).json({ error: 'El nombre de la categoría es obligatorio.' });
+    }
+
+    const cleanName = name.trim();
+    const current = db.prepare('SELECT * FROM categories WHERE id = ?').get(id);
+    if (!current) {
+      return res.status(404).json({ error: 'Categoría no encontrada.' });
+    }
+
+    const existing = db.prepare('SELECT id FROM categories WHERE LOWER(name) = LOWER(?) AND id != ?').get(cleanName, id);
+    if (existing) {
+      return res.status(400).json({ error: 'Ya existe otra categoría con ese nombre.' });
+    }
+
+    const oldName = current.name;
+
+    const updateTx = db.transaction(() => {
+      db.prepare(`
+        UPDATE categories 
+        SET name = ?, description = ?
+        WHERE id = ?
+      `).run(cleanName, (description || '').trim(), id);
+
+      if (oldName !== cleanName) {
+        db.prepare(`
+          UPDATE products 
+          SET category = ?
+          WHERE category = ?
+        `).run(cleanName, oldName);
+      }
+    });
+
+    updateTx();
+
+    const updated = db.prepare(`
+      SELECT 
+        c.*, 
+        (SELECT COUNT(*) FROM products p WHERE p.category = c.name) as product_count
+      FROM categories c 
+      WHERE c.id = ?
+    `).get(id);
+
+    io.emit('categories_updated', { action: 'update', category: updated });
+    res.json(updated);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/categories/:id', (req, res) => {
+  try {
+    const { id } = req.params;
+    const category = db.prepare('SELECT * FROM categories WHERE id = ?').get(id);
+    if (!category) {
+      return res.status(404).json({ error: 'Categoría no encontrada.' });
+    }
+
+    const productCount = db.prepare('SELECT COUNT(*) as count FROM products WHERE category = ?').get(category.name).count;
+
+    const deleteTx = db.transaction(() => {
+      if (productCount > 0) {
+        const generalCat = db.prepare("SELECT id FROM categories WHERE name = 'General'").get();
+        if (!generalCat) {
+          db.prepare("INSERT INTO categories (name, description) VALUES ('General', 'Categoría general por defecto')").run();
+        }
+        db.prepare("UPDATE products SET category = 'General' WHERE category = ?").run(category.name);
+      }
+
+      db.prepare('DELETE FROM categories WHERE id = ?').run(id);
+    });
+
+    deleteTx();
+
+    io.emit('categories_updated', { action: 'delete', id: Number(id), name: category.name });
+    res.json({ success: true, message: `Categoría "${category.name}" eliminada con éxito.` });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ==========================================
 // 1. PRODUCTOS E INVENTARIO
 // ==========================================
 app.get('/api/products', (req, res) => {

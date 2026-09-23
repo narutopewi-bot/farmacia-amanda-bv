@@ -4,10 +4,11 @@ import {
   Calendar, ShieldAlert, Edit2, Layers, CheckCircle, X,
   Upload, Image as ImageIcon, Camera, Trash2, HelpCircle, Sparkles, Check
 } from 'lucide-react';
-import { Product } from '../types';
+import { Product, Category } from '../types';
 
 interface InventoryViewProps {
   products: Product[];
+  categories?: Category[];
   onRefresh: () => void;
 }
 
@@ -20,7 +21,7 @@ const PHARMACY_IMAGE_PRESETS = [
   { label: 'Cuidado Personal', url: 'https://images.unsplash.com/photo-1556228722-d0b5be7490bf?w=500&auto=format&fit=crop&q=60' }
 ];
 
-export const InventoryView: React.FC<InventoryViewProps> = ({ products, onRefresh }) => {
+export const InventoryView: React.FC<InventoryViewProps> = ({ products, categories: categoriesProp = [], onRefresh }) => {
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('ALL');
   const [stockFilter, setStockFilter] = useState<'ALL' | 'LOW' | 'OUT'>('ALL');
@@ -156,9 +157,31 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ products, onRefres
     reader.readAsDataURL(file);
   };
 
+  const availableCategoryNames = useMemo(() => {
+    if (categoriesProp && categoriesProp.length > 0) {
+      return categoriesProp.map(c => c.name);
+    }
+    const fromProducts = Array.from(new Set(products.map(p => p.category))).filter(Boolean);
+    return fromProducts.length > 0 ? fromProducts : [
+      'Analgésicos y Antiinflamatorios',
+      'Antibióticos',
+      'Cardiovascular y Presión Arterial',
+      'Diabetes y Endocrinología',
+      'Antialérgicos y Antihistamínicos',
+      'Gastrointestinal',
+      'Pediatría y Nutrición',
+      'Vitaminas y Suplementos',
+      'Material Médico y Desinfección',
+      'Cuidado Personal'
+    ];
+  }, [categoriesProp, products]);
+
   const categories = useMemo(() => {
-    return ['ALL', ...Array.from(new Set(products.map(p => p.category))).filter(Boolean)];
-  }, [products]);
+    const set = new Set<string>();
+    availableCategoryNames.forEach(c => set.add(c));
+    products.forEach(p => { if (p.category) set.add(p.category); });
+    return ['ALL', ...Array.from(set)];
+  }, [availableCategoryNames, products]);
 
   const filtered = useMemo(() => {
     return products.filter(p => {
@@ -355,7 +378,13 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ products, onRefres
           </select>
 
           <button
-            onClick={() => setShowNewProductModal(true)}
+            onClick={() => {
+              setFormData(prev => ({
+                ...prev,
+                category: prev.category || availableCategoryNames[0] || 'General'
+              }));
+              setShowNewProductModal(true);
+            }}
             className="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs py-2 px-4 rounded-xl flex items-center gap-1.5 shadow-md shadow-emerald-700/20 transition active:scale-98 cursor-pointer"
           >
             <Plus className="w-4 h-4" />
@@ -596,16 +625,9 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ products, onRefres
                     onChange={e => setFormData({ ...formData, category: e.target.value })}
                     className="w-full p-2 bg-[#0f172a] border border-slate-700 text-white rounded-lg text-xs"
                   >
-                    <option value="Analgésicos y Antiinflamatorios">Analgésicos y Antiinflamatorios</option>
-                    <option value="Antibióticos">Antibióticos</option>
-                    <option value="Cardiovascular y Presión Arterial">Cardiovascular y Presión Arterial</option>
-                    <option value="Diabetes y Endocrinología">Diabetes y Endocrinología</option>
-                    <option value="Antialérgicos y Antihistamínicos">Antialérgicos y Antihistamínicos</option>
-                    <option value="Gastrointestinal">Gastrointestinal</option>
-                    <option value="Pediatría y Nutrición">Pediatría y Nutrición</option>
-                    <option value="Vitaminas y Suplementos">Vitaminas y Suplementos</option>
-                    <option value="Material Médico y Desinfección">Material Médico y Desinfección</option>
-                    <option value="Cuidado Personal">Cuidado Personal</option>
+                    {availableCategoryNames.map(catName => (
+                      <option key={catName} value={catName}>{catName}</option>
+                    ))}
                   </select>
                   <span className="text-[10px] text-slate-400 mt-0.5 block">
                     Sección en la tienda online y reportes.

@@ -63,6 +63,13 @@ export function initDatabase() {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
+    CREATE TABLE IF NOT EXISTS categories (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT UNIQUE NOT NULL,
+      description TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
     CREATE TABLE IF NOT EXISTS warehouses (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       code TEXT UNIQUE NOT NULL,
@@ -468,6 +475,30 @@ function seedInitialData() {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     insertCustomer.run('V-12345678', 'Consumidor Final', '0000-0000000', 'ventas@farmacia.com', 'Mostrador', 0, 0, 0, 'Cliente genérico mostrador');
+  }
+
+  // 5. Categorías iniciales de productos y medicamentos
+  const catCount = db.prepare('SELECT count(*) as total FROM categories').get().total;
+  if (catCount === 0) {
+    const insertCat = db.prepare(`
+      INSERT INTO categories (name, description)
+      VALUES (?, ?)
+    `);
+    const initialCategories = [
+      ['Analgésicos y Antiinflamatorios', 'Alivio del dolor corporal, muscular, articular y cefaleas.'],
+      ['Antibióticos', 'Medicamentos antimicrobianos para combatir infecciones bacterianas.'],
+      ['Cardiovascular y Presión Arterial', 'Antihipertensivos, reguladores de ritmo cardíaco y circulación.'],
+      ['Diabetes y Endocrinología', 'Hipoglucemiantes orales, insulina y control metabólico.'],
+      ['Antialérgicos y Antihistamínicos', 'Tratamiento de rinitis, alergias respiratorias y cutáneas.'],
+      ['Gastrointestinal', 'Antiácidos, protectores gástricos, antidiarreicos y digestivos.'],
+      ['Pediatría y Nutrición', 'Sueros orales, fórmulas lácteas y suplementos infantiles.'],
+      ['Vitaminas y Suplementos', 'Multivitamínicos, minerales y refuerzo inmunológico.'],
+      ['Material Médico y Desinfección', 'Inyectadoras, gasas, vendas, alcohol y bioseguridad.'],
+      ['Cuidado Personal y Dermatología', 'Higiene, dermocosmética y cuidado de la piel.']
+    ];
+    for (const [name, desc] of initialCategories) {
+      try { insertCat.run(name, desc); } catch (e) {}
+    }
   }
 }
 

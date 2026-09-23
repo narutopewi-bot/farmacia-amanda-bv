@@ -6,7 +6,7 @@ import {
   CreditCard, Settings as SettingsIcon, Menu, X, LayoutDashboard
 } from 'lucide-react';
 import { socket } from './socket';
-import { Product, Customer, Supplier, Employee, OnlineOrder, Sale, Settings } from './types';
+import { Product, Customer, Supplier, Employee, OnlineOrder, Sale, Settings, Category } from './types';
 
 // Components
 import { Navbar } from './components/Navbar';
@@ -110,6 +110,7 @@ export function App() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [orders, setOrders] = useState<OnlineOrder[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [settings, setSettings] = useState<Settings>({
     id: 1,
     exchange_rate: 85.0,
@@ -149,22 +150,24 @@ export function App() {
   // Fetch all core datasets
   const fetchAllData = async () => {
     try {
-      const [pRes, cRes, sRes, eRes, oRes, setRes] = await Promise.all([
+      const [pRes, cRes, sRes, eRes, oRes, setRes, catRes] = await Promise.all([
         fetch('/api/products'),
         fetch('/api/customers'),
         fetch('/api/suppliers'),
         fetch('/api/employees'),
         fetch('/api/orders'),
-        fetch('/api/settings')
+        fetch('/api/settings'),
+        fetch('/api/categories')
       ]);
 
-      const [pJson, cJson, sJson, eJson, oJson, setJson] = await Promise.all([
+      const [pJson, cJson, sJson, eJson, oJson, setJson, catJson] = await Promise.all([
         pRes.json(),
         cRes.json(),
         sRes.json(),
         eRes.json(),
         oRes.json(),
-        setRes.json()
+        setRes.json(),
+        catRes.json()
       ]);
 
       setProducts(pJson);
@@ -182,6 +185,7 @@ export function App() {
       }
       setOrders(oJson);
       if (setJson && setJson.id) setSettings(setJson);
+      if (Array.isArray(catJson)) setCategories(catJson);
     } catch (err) {
       console.error('Error loading data:', err);
     } finally {
@@ -241,12 +245,17 @@ export function App() {
       setSettings(updatedSettings);
     }
 
+    function onCategoriesUpdated() {
+      fetchAllData();
+    }
+
     socket.on('connect', onConnect);
     socket.on('disconnect', onDisconnect);
     socket.on('stock_updated', onStockUpdated);
     socket.on('new_online_order', onNewOrder);
     socket.on('order_status_updated', onOrderStatusUpdated);
     socket.on('settings_updated', onSettingsUpdated);
+    socket.on('categories_updated', onCategoriesUpdated);
 
     return () => {
       socket.off('connect', onConnect);
@@ -255,6 +264,7 @@ export function App() {
       socket.off('new_online_order', onNewOrder);
       socket.off('order_status_updated', onOrderStatusUpdated);
       socket.off('settings_updated', onSettingsUpdated);
+      socket.off('categories_updated', onCategoriesUpdated);
     };
   }, []);
 
@@ -543,6 +553,7 @@ export function App() {
                 {activeTab === 'inventory' && (
                   <InventoryView
                     products={products}
+                    categories={categories}
                     onRefresh={fetchAllData}
                   />
                 )}
@@ -628,6 +639,7 @@ export function App() {
                     settings={settings}
                     employees={employees}
                     currentUser={currentUser}
+                    categories={categories}
                     onRefresh={fetchAllData}
                   />
                 )}
