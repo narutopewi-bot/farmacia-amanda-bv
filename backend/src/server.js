@@ -421,6 +421,85 @@ app.get('/api/products', (req, res) => {
   }
 });
 
+// Búsqueda de imágenes en línea para medicamentos (debe ir antes de /:id)
+app.get('/api/products/search-images', async (req, res) => {
+  try {
+    const query = req.query.q;
+    if (!query || !query.trim()) {
+      return res.status(400).json({ success: false, error: 'Parámetro de búsqueda requerido.', images: [], results: [] });
+    }
+
+    const cleanQuery = query.trim() + ' medicamento farmacia';
+    let results = [];
+
+    // 1. DuckDuckGo Image Search
+    try {
+      const tokenUrl = 'https://duckduckgo.com/?q=' + encodeURIComponent(cleanQuery);
+      const tokenRes = await fetch(tokenUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        },
+        signal: AbortSignal.timeout(6000)
+      });
+      const html = await tokenRes.text();
+      const vqdMatch = html.match(/vqd=([0-9-]+)/) || html.match(/vqd=([a-zA-Z0-9_-]+)/);
+
+      if (vqdMatch) {
+        const vqd = vqdMatch[1];
+        const apiUrl = `https://duckduckgo.com/i.js?l=es-es&o=json&q=${encodeURIComponent(cleanQuery)}&vqd=${vqd}&f=,,,;&p=1`;
+        const apiRes = await fetch(apiUrl, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+          },
+          signal: AbortSignal.timeout(6000)
+        });
+        if (apiRes.ok) {
+          const data = await apiRes.json();
+          if (data && Array.isArray(data.results)) {
+            results = data.results.slice(0, 16).map(r => ({
+              title: r.title || 'Medicamento',
+              image: r.image,
+              thumbnail: r.thumbnail || r.image
+            })).filter(r => r.image && (r.image.startsWith('http://') || r.image.startsWith('https://')));
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[Image Search] DDG search error, attempting fallback:', e.message);
+    }
+
+    // 2. Fallback a Wikimedia Commons
+    if (results.length === 0) {
+      try {
+        const wikiUrl = `https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrnamespace=6&gsrsearch=${encodeURIComponent(query)}&gsrlimit=12&prop=imageinfo&iiprop=url|thumburl&iiurlwidth=400&format=json`;
+        const wikiRes = await fetch(wikiUrl, {
+          headers: { 'User-Agent': 'FarmaciaAmanda/1.0' },
+          signal: AbortSignal.timeout(5000)
+        });
+        if (wikiRes.ok) {
+          const wikiData = await wikiRes.json();
+          const pages = wikiData.query?.pages ? Object.values(wikiData.query.pages) : [];
+          results = pages.map(p => {
+            const info = p.imageinfo?.[0];
+            if (!info) return null;
+            return {
+              title: p.title ? p.title.replace(/^File:/i, '') : 'Medicamento',
+              image: info.url,
+              thumbnail: info.thumburl || info.url
+            };
+          }).filter(Boolean);
+        }
+      } catch (e) {
+        console.warn('[Image Search] Wikimedia fallback error:', e.message);
+      }
+    }
+
+    res.json({ success: true, images: results, results });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message, images: [], results: [] });
+  }
+});
+
 app.get('/api/products/:id', (req, res) => {
   try {
     const prod = getProductWithStock(req.params.id);
@@ -539,85 +618,6 @@ app.delete('/api/products/:id', (req, res) => {
     res.json({ success: true, message: `Producto "${prod.name}" eliminado correctamente.` });
   } catch (err) {
     res.status(500).json({ error: err.message });
-  }
-});
-
-// Búsqueda de imágenes en línea para medicamentos
-app.get('/api/products/search-images', async (req, res) => {
-  try {
-    const query = req.query.q;
-    if (!query || !query.trim()) {
-      return res.status(400).json({ error: 'Parámetro de búsqueda requerido.', results: [] });
-    }
-
-    const cleanQuery = query.trim() + ' medicamento farmacia';
-    let results = [];
-
-    // 1. DuckDuckGo Image Search
-    try {
-      const tokenUrl = 'https://duckduckgo.com/?q=' + encodeURIComponent(cleanQuery);
-      const tokenRes = await fetch(tokenUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        },
-        signal: AbortSignal.timeout(6000)
-      });
-      const html = await tokenRes.text();
-      const vqdMatch = html.match(/vqd=([0-9-]+)/) || html.match(/vqd=([a-zA-Z0-9_-]+)/);
-
-      if (vqdMatch) {
-        const vqd = vqdMatch[1];
-        const apiUrl = `https://duckduckgo.com/i.js?l=es-es&o=json&q=${encodeURIComponent(cleanQuery)}&vqd=${vqd}&f=,,,;&p=1`;
-        const apiRes = await fetch(apiUrl, {
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-          },
-          signal: AbortSignal.timeout(6000)
-        });
-        if (apiRes.ok) {
-          const data = await apiRes.json();
-          if (data && Array.isArray(data.results)) {
-            results = data.results.slice(0, 16).map(r => ({
-              title: r.title || 'Medicamento',
-              image: r.image,
-              thumbnail: r.thumbnail || r.image
-            })).filter(r => r.image && (r.image.startsWith('http://') || r.image.startsWith('https://')));
-          }
-        }
-      }
-    } catch (e) {
-      console.warn('[Image Search] DDG search error, attempting fallback:', e.message);
-    }
-
-    // 2. Fallback a Wikimedia Commons
-    if (results.length === 0) {
-      try {
-        const wikiUrl = `https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrnamespace=6&gsrsearch=${encodeURIComponent(query)}&gsrlimit=12&prop=imageinfo&iiprop=url|thumburl&iiurlwidth=400&format=json`;
-        const wikiRes = await fetch(wikiUrl, {
-          headers: { 'User-Agent': 'FarmaciaAmanda/1.0' },
-          signal: AbortSignal.timeout(5000)
-        });
-        if (wikiRes.ok) {
-          const wikiData = await wikiRes.json();
-          const pages = wikiData.query?.pages ? Object.values(wikiData.query.pages) : [];
-          results = pages.map(p => {
-            const info = p.imageinfo?.[0];
-            if (!info) return null;
-            return {
-              title: p.title ? p.title.replace(/^File:/i, '') : 'Medicamento',
-              image: info.url,
-              thumbnail: info.thumburl || info.url
-            };
-          }).filter(Boolean);
-        }
-      } catch (e) {
-        console.warn('[Image Search] Wikimedia fallback error:', e.message);
-      }
-    }
-
-    res.json({ success: true, images: results, results });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message, images: [], results: [] });
   }
 });
 
@@ -2844,6 +2844,9 @@ if (fs.existsSync(distPath)) {
     if (req.path.startsWith('/api') || req.path.startsWith('/socket.io')) {
       return next();
     }
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
     res.sendFile(path.join(distPath, 'index.html'));
   });
 }
