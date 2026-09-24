@@ -249,6 +249,10 @@ export function App() {
       fetchAllData();
     }
 
+    function onProductDeleted() {
+      fetchAllData();
+    }
+
     socket.on('connect', onConnect);
     socket.on('disconnect', onDisconnect);
     socket.on('stock_updated', onStockUpdated);
@@ -256,6 +260,7 @@ export function App() {
     socket.on('order_status_updated', onOrderStatusUpdated);
     socket.on('settings_updated', onSettingsUpdated);
     socket.on('categories_updated', onCategoriesUpdated);
+    socket.on('product_deleted', onProductDeleted);
 
     return () => {
       socket.off('connect', onConnect);
@@ -265,6 +270,7 @@ export function App() {
       socket.off('order_status_updated', onOrderStatusUpdated);
       socket.off('settings_updated', onSettingsUpdated);
       socket.off('categories_updated', onCategoriesUpdated);
+      socket.off('product_deleted', onProductDeleted);
     };
   }, []);
 

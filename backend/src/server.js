@@ -522,6 +522,26 @@ app.put('/api/products/:id', (req, res) => {
   }
 });
 
+app.delete('/api/products/:id', (req, res) => {
+  try {
+    const { id } = req.params;
+    const prod = db.prepare('SELECT * FROM products WHERE id = ?').get(id);
+    if (!prod) return res.status(404).json({ error: 'Producto no encontrado' });
+
+    const deleteTx = db.transaction(() => {
+      db.prepare('DELETE FROM batches WHERE product_id = ?').run(id);
+      db.prepare('DELETE FROM products WHERE id = ?').run(id);
+    });
+
+    deleteTx();
+
+    io.emit('product_deleted', { id: Number(id), name: prod.name });
+    res.json({ success: true, message: `Producto "${prod.name}" eliminado correctamente.` });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Lotes y Vencimientos
 app.get('/api/batches/expiring', (req, res) => {
   try {

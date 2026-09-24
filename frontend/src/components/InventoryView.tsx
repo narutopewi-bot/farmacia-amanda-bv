@@ -30,6 +30,10 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ products, categori
   const [showNewProductModal, setShowNewProductModal] = useState(false);
   const [showAddBatchModal, setShowAddBatchModal] = useState(false);
   const [selectedProductForBatch, setSelectedProductForBatch] = useState<Product | null>(null);
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [isSubmittingProduct, setIsSubmittingProduct] = useState(false);
+  const [productToDelete, setProductToDelete] = useState<Product | null>(null);
+  const [isDeletingProduct, setIsDeletingProduct] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // New Product Form
@@ -201,55 +205,158 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ products, categori
     });
   }, [products, search, categoryFilter, stockFilter]);
 
-  const handleCreateProduct = async (e: React.FormEvent) => {
+  const handleOpenNewProduct = () => {
+    setEditingProduct(null);
+    setFormData({
+      code: '',
+      name: '',
+      generic_name: '',
+      category: availableCategoryNames[0] || 'General',
+      presentation: '',
+      laboratory: '',
+      prescription_required: false,
+      cost_price: '',
+      profit_margin: '50',
+      selling_price: '',
+      has_iva: false,
+      iva_percent: 16,
+      min_stock: '5',
+      image_url: '',
+      description: '',
+      warehouse_location: '',
+      batch_number: '',
+      expiry_date: '',
+      initial_stock: ''
+    });
+    setShowNewProductModal(true);
+  };
+
+  const handleOpenEditProduct = (prod: Product) => {
+    setEditingProduct(prod);
+    const numCost = prod.cost_price ? prod.cost_price.toString() : '';
+    const numSelling = prod.selling_price ? prod.selling_price.toString() : '';
+    let marginStr = '50';
+    if (prod.profit_margin !== undefined && prod.profit_margin !== null) {
+      marginStr = prod.profit_margin.toString();
+    } else if (Number(numCost) > 0 && Number(numSelling) > 0) {
+      marginStr = (((Number(numSelling) - Number(numCost)) / Number(numCost)) * 100).toFixed(1);
+    }
+
+    setFormData({
+      code: prod.code || '',
+      name: prod.name || '',
+      generic_name: prod.generic_name || '',
+      category: prod.category || availableCategoryNames[0] || 'General',
+      presentation: prod.presentation || '',
+      laboratory: prod.laboratory || '',
+      prescription_required: prod.prescription_required === 1,
+      cost_price: numCost,
+      profit_margin: marginStr,
+      selling_price: numSelling,
+      has_iva: prod.has_iva === 1,
+      iva_percent: prod.iva_percent !== undefined ? prod.iva_percent : 16,
+      min_stock: prod.min_stock !== undefined ? prod.min_stock.toString() : '5',
+      image_url: prod.image_url || '',
+      description: prod.description || '',
+      warehouse_location: prod.warehouse_location || '',
+      batch_number: '',
+      expiry_date: '',
+      initial_stock: ''
+    });
+    setShowNewProductModal(true);
+  };
+
+  const handleSaveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
+    setIsSubmittingProduct(true);
     try {
-      const payload = {
-        code: formData.code,
-        name: formData.name,
-        generic_name: formData.generic_name,
+      const payload: any = {
+        code: formData.code.trim(),
+        name: formData.name.trim(),
+        generic_name: formData.generic_name.trim(),
         category: formData.category,
-        presentation: formData.presentation,
-        laboratory: formData.laboratory,
+        presentation: formData.presentation.trim(),
+        laboratory: formData.laboratory.trim(),
         prescription_required: formData.prescription_required,
-        cost_price: Number(formData.cost_price),
+        cost_price: Number(formData.cost_price) || 0,
         profit_margin: Number(formData.profit_margin) || 0,
-        selling_price: Number(formData.selling_price),
+        selling_price: Number(formData.selling_price) || 0,
         has_iva: formData.has_iva ? 1 : 0,
-        iva_percent: formData.has_iva ? 16.0 : 0.0,
-        min_stock: Number(formData.min_stock),
+        iva_percent: formData.has_iva ? (Number(formData.iva_percent) || 16.0) : 0.0,
+        min_stock: Number(formData.min_stock) || 5,
         image_url: formData.image_url,
-        description: formData.description,
-        warehouse_location: formData.warehouse_location,
-        initial_batch: formData.batch_number ? {
+        description: formData.description.trim(),
+        warehouse_location: formData.warehouse_location.trim()
+      };
+
+      if (editingProduct) {
+        const res = await fetch(`/api/products/${editingProduct.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.error || 'Error al actualizar medicamento');
+        }
+      } else {
+        payload.initial_batch = formData.batch_number ? {
           batch_number: formData.batch_number,
           expiry_date: formData.expiry_date,
           stock: Number(formData.initial_stock)
-        } : null
-      };
+        } : null;
 
-      const res = await fetch('/api/products', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
+        const res = await fetch('/api/products', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
 
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || 'Error al crear producto');
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.error || 'Error al crear medicamento');
+        }
       }
 
       setShowNewProductModal(false);
+      setEditingProduct(null);
       onRefresh();
       // Reset form
       setFormData({
-        code: '', name: '', generic_name: '', category: 'Analgésicos y Antiinflamatorios',
+        code: '', name: '', generic_name: '', category: availableCategoryNames[0] || 'General',
         presentation: '', laboratory: '', prescription_required: false,
         cost_price: '', profit_margin: '50', selling_price: '', has_iva: false, iva_percent: 16, min_stock: '5', image_url: '',
         description: '', warehouse_location: '', batch_number: '', expiry_date: '', initial_stock: ''
       });
     } catch (err: any) {
-      alert(err.message);
+      alert(err.message || 'Error al procesar el producto');
+    } finally {
+      setIsSubmittingProduct(false);
+    }
+  };
+
+  const handleConfirmDeleteProduct = async () => {
+    if (!productToDelete) return;
+    setIsDeletingProduct(true);
+    try {
+      const res = await fetch(`/api/products/${productToDelete.id}`, {
+        method: 'DELETE'
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Error al eliminar producto');
+      }
+      setProductToDelete(null);
+      if (editingProduct?.id === productToDelete.id) {
+        setShowNewProductModal(false);
+        setEditingProduct(null);
+      }
+      onRefresh();
+    } catch (err: any) {
+      alert(err.message || 'Error al eliminar medicamento');
+    } finally {
+      setIsDeletingProduct(false);
     }
   };
 
@@ -378,13 +485,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ products, categori
           </select>
 
           <button
-            onClick={() => {
-              setFormData(prev => ({
-                ...prev,
-                category: prev.category || availableCategoryNames[0] || 'General'
-              }));
-              setShowNewProductModal(true);
-            }}
+            onClick={handleOpenNewProduct}
             className="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs py-2 px-4 rounded-xl flex items-center gap-1.5 shadow-md shadow-emerald-700/20 transition active:scale-98 cursor-pointer"
           >
             <Plus className="w-4 h-4" />
@@ -409,7 +510,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ products, categori
                 <th className="py-3 px-4 text-right">PVP Venta</th>
                 <th className="py-3 px-4 text-center">Stock Total</th>
                 <th className="py-3 px-4">Lotes & Vencimiento</th>
-                <th className="py-3 px-4 text-center">Acción</th>
+                <th className="py-3 px-4 text-center">Acciones</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800">
@@ -519,17 +620,27 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ products, categori
                       )}
                     </td>
                     <td className="py-3 px-4 text-center">
-                      <button
-                        onClick={() => {
-                          setSelectedProductForBatch(product);
-                          setShowAddBatchModal(true);
-                        }}
-                        className="text-slate-200 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 font-semibold px-2.5 py-1 rounded-lg transition text-[11px] flex items-center gap-1 mx-auto cursor-pointer"
-                        title="Ingresar nuevo lote a este medicamento"
-                      >
-                        <Plus className="w-3 h-3 text-emerald-400" />
-                        <span>+ Lote</span>
-                      </button>
+                      <div className="flex items-center justify-center gap-1.5">
+                        <button
+                          onClick={() => handleOpenEditProduct(product)}
+                          className="text-slate-200 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 hover:border-slate-600 font-semibold px-2.5 py-1 rounded-lg transition text-[11px] flex items-center gap-1 cursor-pointer shadow-xs"
+                          title="Editar información de este medicamento"
+                        >
+                          <Edit2 className="w-3.5 h-3.5 text-emerald-400" />
+                          <span>Editar</span>
+                        </button>
+                        <button
+                          onClick={() => {
+                            setSelectedProductForBatch(product);
+                            setShowAddBatchModal(true);
+                          }}
+                          className="text-slate-200 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 hover:border-slate-600 font-semibold px-2.5 py-1 rounded-lg transition text-[11px] flex items-center gap-1 cursor-pointer shadow-xs"
+                          title="Ingresar nuevo lote a este medicamento"
+                        >
+                          <Plus className="w-3.5 h-3.5 text-teal-400" />
+                          <span>+ Lote</span>
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -545,21 +656,32 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ products, categori
           <div className="bg-slate-900 rounded-2xl shadow-2xl max-w-2xl w-full p-4 sm:p-6 border border-slate-800 text-white animate-in fade-in zoom-in-95 duration-200 max-h-[94vh] flex flex-col">
             <div className="flex items-center justify-between pb-3 border-b border-slate-800 shrink-0">
               <div className="flex items-center gap-2">
-                <Package className="w-5 h-5 text-emerald-400" />
+                {editingProduct ? (
+                  <Edit2 className="w-5 h-5 text-emerald-400" />
+                ) : (
+                  <Package className="w-5 h-5 text-emerald-400" />
+                )}
                 <div>
-                  <h3 className="font-bold text-white text-sm sm:text-base">Registrar Nuevo Medicamento</h3>
-                  <p className="text-[11px] text-slate-400">Ingresa los datos para el catálogo interno y la tienda online.</p>
+                  <h3 className="font-bold text-white text-sm sm:text-base">
+                    {editingProduct ? `Editar Medicamento: ${editingProduct.name}` : 'Registrar Nuevo Medicamento'}
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    {editingProduct ? 'Modifica los precios, categoría, laboratorio o datos del producto.' : 'Ingresa los datos para el catálogo interno y la tienda online.'}
+                  </p>
                 </div>
               </div>
               <button 
-                onClick={() => setShowNewProductModal(false)} 
+                onClick={() => {
+                  setShowNewProductModal(false);
+                  setEditingProduct(null);
+                }} 
                 className="text-slate-400 hover:text-white p-1 rounded-lg cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleCreateProduct} className="space-y-4 mt-3 text-xs overflow-y-auto flex-1 pr-1">
+            <form onSubmit={handleSaveProduct} className="space-y-4 mt-3 text-xs overflow-y-auto flex-1 pr-1">
               
               {/* Código de barras y Nombre comercial */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -863,38 +985,50 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ products, categori
                 )}
               </div>
 
-              {/* Initial Batch Section */}
-              <div className="bg-[#0f172a] p-3 rounded-xl border border-slate-800 space-y-2">
-                <p className="font-bold text-slate-300 text-[11px]">Lote Inicial de Entrada (Opcional):</p>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  <div>
-                    <input
-                      type="text"
-                      value={formData.batch_number}
-                      onChange={e => setFormData({ ...formData, batch_number: e.target.value })}
-                      placeholder="Número de Lote (Ej: LT-902)"
-                      className="w-full p-1.5 bg-slate-900 border border-slate-700 text-white rounded-lg text-xs"
-                    />
-                  </div>
-                  <div>
-                    <input
-                      type="date"
-                      value={formData.expiry_date}
-                      onChange={e => setFormData({ ...formData, expiry_date: e.target.value })}
-                      className="w-full p-1.5 bg-slate-900 border border-slate-700 text-white rounded-lg text-xs"
-                    />
-                  </div>
-                  <div>
-                    <input
-                      type="number"
-                      value={formData.initial_stock}
-                      onChange={e => setFormData({ ...formData, initial_stock: e.target.value })}
-                      placeholder="Cantidad inicial"
-                      className="w-full p-1.5 bg-slate-900 border border-slate-700 text-white rounded-lg text-xs font-bold"
-                    />
+              {/* Initial Batch Section (solo para nuevos productos) */}
+              {!editingProduct ? (
+                <div className="bg-[#0f172a] p-3 rounded-xl border border-slate-800 space-y-2">
+                  <p className="font-bold text-slate-300 text-[11px]">Lote Inicial de Entrada (Opcional):</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <div>
+                      <input
+                        type="text"
+                        value={formData.batch_number}
+                        onChange={e => setFormData({ ...formData, batch_number: e.target.value })}
+                        placeholder="Número de Lote (Ej: LT-902)"
+                        className="w-full p-1.5 bg-slate-900 border border-slate-700 text-white rounded-lg text-xs"
+                      />
+                    </div>
+                    <div>
+                      <input
+                        type="date"
+                        value={formData.expiry_date}
+                        onChange={e => setFormData({ ...formData, expiry_date: e.target.value })}
+                        className="w-full p-1.5 bg-slate-900 border border-slate-700 text-white rounded-lg text-xs"
+                      />
+                    </div>
+                    <div>
+                      <input
+                        type="number"
+                        value={formData.initial_stock}
+                        onChange={e => setFormData({ ...formData, initial_stock: e.target.value })}
+                        placeholder="Cantidad inicial"
+                        className="w-full p-1.5 bg-slate-900 border border-slate-700 text-white rounded-lg text-xs font-bold"
+                      />
+                    </div>
                   </div>
                 </div>
-              </div>
+              ) : (
+                <div className="bg-[#0f172a] p-3.5 rounded-xl border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                  <div>
+                    <span className="font-bold text-slate-200 block">Existencias Actuales:</span>
+                    <span className="text-[11px] text-emerald-400 font-semibold">{editingProduct.total_stock} unidades disponibles en {editingProduct.batches?.length || 0} lote(s)</span>
+                  </div>
+                  <span className="text-[10px] text-slate-400 italic">
+                    Para modificar o registrar nuevos lotes, usa el botón "+ Lote" de la tabla.
+                  </span>
+                </div>
+              )}
 
               {/* Imagen para la Tienda Online y POS */}
               <div className="bg-[#0f172a] p-3.5 rounded-xl border border-slate-800 space-y-3">
@@ -1016,20 +1150,37 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ products, categori
               </div>
 
               {/* Action Buttons */}
-              <div className="pt-3 border-t border-slate-800 flex justify-end gap-2 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => setShowNewProductModal(false)}
-                  className="px-4 py-2 border border-slate-700 rounded-xl text-slate-300 font-medium hover:bg-slate-800 cursor-pointer"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl shadow-md cursor-pointer active:scale-98 transition"
-                >
-                  Guardar Medicamento
-                </button>
+              <div className="pt-3 border-t border-slate-800 flex items-center justify-between gap-2 shrink-0">
+                {editingProduct ? (
+                  <button
+                    type="button"
+                    onClick={() => setProductToDelete(editingProduct)}
+                    className="px-3 py-2 text-red-400 hover:text-red-300 hover:bg-red-950/60 border border-red-900/60 rounded-xl font-bold text-xs flex items-center gap-1.5 transition cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Eliminar Artículo</span>
+                  </button>
+                ) : <div />}
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowNewProductModal(false);
+                      setEditingProduct(null);
+                    }}
+                    className="px-4 py-2 border border-slate-700 rounded-xl text-slate-300 font-medium hover:bg-slate-800 cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSubmittingProduct}
+                    className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl shadow-md cursor-pointer active:scale-98 transition disabled:opacity-50 flex items-center gap-1.5"
+                  >
+                    <span>{isSubmittingProduct ? 'Guardando...' : (editingProduct ? 'Guardar Cambios' : 'Guardar Medicamento')}</span>
+                  </button>
+                </div>
               </div>
             </form>
           </div>
@@ -1116,6 +1267,54 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ products, categori
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Confirmar Eliminación de Medicamento */}
+      {productToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-xs p-4 animate-in fade-in duration-150">
+          <div className="bg-slate-900 rounded-2xl shadow-2xl max-w-md w-full p-5 sm:p-6 border border-red-900/60 text-white animate-in zoom-in-95 duration-150">
+            <div className="flex items-center gap-3 pb-3 border-b border-slate-800">
+              <div className="p-2.5 bg-red-950/80 border border-red-800/80 text-red-400 rounded-xl">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-extrabold text-sm sm:text-base text-white">
+                  ¿Eliminar Medicamento?
+                </h3>
+                <p className="text-xs text-red-300 font-semibold">{productToDelete.name}</p>
+              </div>
+            </div>
+
+            <div className="py-4 space-y-2 text-xs text-slate-300">
+              <p>
+                ¿Estás seguro de que deseas eliminar permanentemente este artículo del inventario?
+              </p>
+              <div className="p-3 bg-red-950/40 border border-red-800/60 rounded-xl text-red-200 text-[11px] leading-relaxed">
+                <strong>Atención:</strong> Esta acción borrará la ficha del producto y todos sus lotes asociados ({productToDelete.total_stock} unidades registradas).
+              </div>
+            </div>
+
+            <div className="pt-3 border-t border-slate-800 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                disabled={isDeletingProduct}
+                onClick={() => setProductToDelete(null)}
+                className="px-4 py-2 border border-slate-700 rounded-xl text-slate-300 font-medium hover:bg-slate-800 transition cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingProduct}
+                onClick={handleConfirmDeleteProduct}
+                className="px-5 py-2 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl shadow-md transition cursor-pointer active:scale-95 disabled:opacity-50 flex items-center gap-1.5"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>{isDeletingProduct ? 'Eliminando...' : 'Sí, Eliminar Artículo'}</span>
+              </button>
+            </div>
           </div>
         </div>
       )}
