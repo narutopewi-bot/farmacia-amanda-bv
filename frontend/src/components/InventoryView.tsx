@@ -1,10 +1,12 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { 
   Package, Plus, Search, Filter, AlertTriangle, 
   Calendar, ShieldAlert, Edit2, Layers, CheckCircle, X,
-  Upload, Image as ImageIcon, Camera, Trash2, HelpCircle, Sparkles, Check
+  Upload, Image as ImageIcon, Camera, Trash2, HelpCircle, Sparkles, Check,
+  ScanLine, Globe, RefreshCw
 } from 'lucide-react';
 import { Product, Category } from '../types';
+import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 
 interface InventoryViewProps {
   products: Product[];
@@ -35,6 +37,18 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ products, categori
   const [productToDelete, setProductToDelete] = useState<Product | null>(null);
   const [isDeletingProduct, setIsDeletingProduct] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Camera Barcode Scanner State
+  const [showBarcodeScanner, setShowBarcodeScanner] = useState(false);
+  const [scannerError, setScannerError] = useState<string | null>(null);
+  const html5QrCodeRef = useRef<Html5Qrcode | null>(null);
+
+  // Internet Image Search State
+  const [showImageSearchModal, setShowImageSearchModal] = useState(false);
+  const [imageSearchQuery, setImageSearchQuery] = useState('');
+  const [isSearchingImages, setIsSearchingImages] = useState(false);
+  const [imageSearchResults, setImageSearchResults] = useState<{ image: string; thumbnail: string; title: string; source: string }[]>([]);
+  const [imageSearchError, setImageSearchError] = useState<string | null>(null);
 
   // New Product Form
   const [formData, setFormData] = useState({
@@ -159,6 +173,160 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ products, categori
       setFormData(prev => ({ ...prev, image_url: reader.result as string }));
     };
     reader.readAsDataURL(file);
+  };
+
+  // Sound beep when barcode is recognized
+  const playBeep = () => {
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(880, ctx.currentTime);
+      gain.gain.setValueAtTime(0.3, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.15);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.15);
+    } catch {
+      // AudioContext unavailable or muted
+    }
+  };
+
+  const handleStartScanner = () => {
+    setScannerError(null);
+    setShowBarcodeScanner(true);
+  };
+
+  const handleStopScanner = async () => {
+    if (html5QrCodeRef.current) {
+      try {
+        if (html5QrCodeRef.current.isScanning) {
+          await html5QrCodeRef.current.stop();
+        }
+        html5QrCodeRef.current.clear();
+      } catch (e) {
+        console.warn('Error stopping camera scanner:', e);
+      }
+      html5QrCodeRef.current = null;
+    }
+    setShowBarcodeScanner(false);
+  };
+
+  const handleGenerateBarcode = () => {
+    const randomSuffix = Math.floor(1000000000 + Math.random() * 9000000000).toString();
+    const generated = `759${randomSuffix.slice(0, 9)}`;
+    setFormData(prev => ({ ...prev, code: generated }));
+  };
+
+  // Barcode scanner effect for mobile camera
+  useEffect(() => {
+    let isMounted = true;
+    if (!showBarcodeScanner) return;
+
+    const initScanner = async () => {
+      await new Promise(r => setTimeout(r, 150));
+      const element = document.getElementById('barcode-reader');
+      if (!element || !isMounted) return;
+
+      try {
+        const qrCode = new Html5Qrcode('barcode-reader', {
+          formatsToSupport: [
+            Html5QrcodeSupportedFormats.EAN_13,
+            Html5QrcodeSupportedFormats.EAN_8,
+            Html5QrcodeSupportedFormats.UPC_A,
+            Html5QrcodeSupportedFormats.UPC_E,
+            Html5QrcodeSupportedFormats.CODE_128,
+            Html5QrcodeSupportedFormats.CODE_39,
+            Html5QrcodeSupportedFormats.QR_CODE
+          ],
+          verbose: false
+        });
+        html5QrCodeRef.current = qrCode;
+
+        await qrCode.start(
+          { facingMode: 'environment' },
+          {
+            fps: 15,
+            qrbox: { width: 250, height: 160 },
+            aspectRatio: 1.0
+          },
+          (decodedText) => {
+            playBeep();
+            if (navigator.vibrate) {
+              try { navigator.vibrate(100); } catch (_) {}
+            }
+            setFormData(prev => ({ ...prev, code: decodedText }));
+            handleStopScanner();
+          },
+          () => {}
+        );
+      } catch (err: any) {
+        console.error('Camera scanner init failed:', err);
+        if (isMounted) {
+          const isNotAllowed = err?.name === 'NotAllowedError' || err?.message?.includes('NotAllowedError');
+          setScannerError(
+            isNotAllowed
+              ? 'Permiso de cámara denegado. Concede permisos de cámara en tu navegador.'
+              : 'No se pudo iniciar la cámara. Verifica que no esté en uso por otra app.'
+          );
+        }
+      }
+    };
+
+    initScanner();
+
+    return () => {
+      isMounted = false;
+      if (html5QrCodeRef.current) {
+        if (html5QrCodeRef.current.isScanning) {
+          html5QrCodeRef.current.stop().catch(console.warn);
+        }
+        html5QrCodeRef.current = null;
+      }
+    };
+  }, [showBarcodeScanner]);
+
+  // Online image search handlers
+  const handleOpenImageSearch = () => {
+    const defaultTerm = (formData.name || formData.generic_name || '').trim();
+    setImageSearchQuery(defaultTerm);
+    setImageSearchResults([]);
+    setImageSearchError(null);
+    setShowImageSearchModal(true);
+    if (defaultTerm) {
+      executeImageSearch(defaultTerm);
+    }
+  };
+
+  const executeImageSearch = async (term: string) => {
+    if (!term.trim()) return;
+    setIsSearchingImages(true);
+    setImageSearchError(null);
+    try {
+      const res = await fetch(`/api/products/search-images?q=${encodeURIComponent(term.trim())}`);
+      const data = await res.json();
+      const list = Array.isArray(data.images) ? data.images : (Array.isArray(data.results) ? data.results : []);
+      if (list.length > 0) {
+        setImageSearchResults(list);
+      } else {
+        setImageSearchResults([]);
+        setImageSearchError('No se encontraron imágenes para esta búsqueda. Intenta con la fórmula médica o nombre comercial.');
+      }
+    } catch (err: any) {
+      console.error('Error fetching online images:', err);
+      setImageSearchError('Error de conexión al buscar imágenes en línea.');
+    } finally {
+      setIsSearchingImages(false);
+    }
+  };
+
+  const handleSelectOnlineImage = (url: string) => {
+    setFormData(prev => ({ ...prev, image_url: url }));
+    setShowImageSearchModal(false);
   };
 
   const availableCategoryNames = useMemo(() => {
@@ -688,6 +856,26 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ products, categori
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <label className="font-bold text-slate-200">Código de Barras *</label>
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={handleStartScanner}
+                        className="px-2 py-0.5 bg-emerald-600/30 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/50 rounded text-[10px] font-bold flex items-center gap-1 transition cursor-pointer"
+                        title="Escanear código de barras con la cámara del celular"
+                      >
+                        <ScanLine className="w-3 h-3 text-emerald-400" />
+                        <span>Cámara</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleGenerateBarcode}
+                        className="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded text-[10px] font-semibold flex items-center gap-1 transition cursor-pointer"
+                        title="Generar código de barras interno aleatorio"
+                      >
+                        <RefreshCw className="w-3 h-3" />
+                        <span>Auto</span>
+                      </button>
+                    </div>
                   </div>
                   <input
                     type="text"
@@ -698,7 +886,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ products, categori
                     className="w-full p-2 bg-[#0f172a] border border-slate-700 text-white placeholder-slate-500 rounded-lg focus:ring-2 focus:ring-emerald-500 font-mono text-xs"
                   />
                   <span className="text-[10px] text-slate-400 mt-0.5 block">
-                    Escanea con pistola láser o escribe el código.
+                    Escanea con la cámara del celular, pistola láser o usa código automático.
                   </span>
                 </div>
                 <div className="sm:col-span-2">
@@ -1056,11 +1244,20 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ products, categori
                 <div className="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
+                    onClick={handleOpenImageSearch}
+                    className="px-3.5 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 shadow-md transition active:scale-95 cursor-pointer"
+                  >
+                    <Globe className="w-3.5 h-3.5 text-blue-200" />
+                    <span>Sacar Foto de Internet</span>
+                  </button>
+
+                  <button
+                    type="button"
                     onClick={() => fileInputRef.current?.click()}
                     className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 shadow-md transition active:scale-95 cursor-pointer"
                   >
                     <Upload className="w-3.5 h-3.5" />
-                    <span>Subir Foto desde Celular o PC</span>
+                    <span>Subir Foto (Celular o PC)</span>
                   </button>
 
                   <button
@@ -1098,10 +1295,19 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ products, categori
                     <div className="flex items-center gap-1.5">
                       <button
                         type="button"
+                        onClick={handleOpenImageSearch}
+                        className="px-2.5 py-1.5 bg-blue-900/60 hover:bg-blue-800/80 text-blue-300 border border-blue-700/60 font-semibold rounded-lg text-[11px] transition cursor-pointer flex items-center gap-1"
+                        title="Buscar otra foto en internet"
+                      >
+                        <Globe className="w-3 h-3" />
+                        <span>Internet</span>
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => fileInputRef.current?.click()}
                         className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold rounded-lg text-[11px] transition cursor-pointer"
                       >
-                        Cambiar
+                        Subir otra
                       </button>
                       <button
                         type="button"
@@ -1313,6 +1519,203 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ products, categori
               >
                 <Trash2 className="w-4 h-4" />
                 <span>{isDeletingProduct ? 'Eliminando...' : 'Sí, Eliminar Artículo'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Escáner de Código de Barras con la Cámara del Celular */}
+      {showBarcodeScanner && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="bg-[#1e293b] border border-slate-700 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl flex flex-col animate-in zoom-in-95 duration-150">
+            {/* Cabecera */}
+            <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/70">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-emerald-950/80 border border-emerald-700/60 text-emerald-400 rounded-xl">
+                  <ScanLine className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-black text-white text-sm">Escáner de Código de Barras</h3>
+                  <p className="text-[11px] text-slate-400">Apunta la cámara a la caja o frasco del medicamento</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleStopScanner}
+                className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Viewfinder cámara */}
+            <div className="p-4 flex flex-col items-center justify-center bg-black/50">
+              <div className="relative w-full max-w-xs sm:max-w-sm rounded-xl overflow-hidden border-2 border-emerald-500/70 bg-black shadow-inner flex items-center justify-center min-h-[260px]">
+                <div id="barcode-reader" className="w-full"></div>
+                {/* Laser animation */}
+                <div className="absolute inset-x-2 top-1/2 -translate-y-1/2 h-0.5 bg-emerald-400 shadow-[0_0_12px_#10b981] pointer-events-none animate-pulse"></div>
+              </div>
+
+              {scannerError && (
+                <div className="mt-3 p-3 bg-red-950/70 border border-red-800/80 rounded-xl text-red-200 text-xs flex items-center gap-2 w-full">
+                  <AlertTriangle className="w-4 h-4 shrink-0 text-red-400" />
+                  <span>{scannerError}</span>
+                </div>
+              )}
+
+              <div className="mt-3 text-center text-xs text-slate-300 flex items-center gap-1.5 bg-slate-900/80 px-3 py-2 rounded-xl border border-slate-800">
+                <Sparkles className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>Enfoca el código de barras (EAN-13, UPC, 128 o QR). Emitirá un bip al detectar.</span>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="p-3 border-t border-slate-800 bg-slate-900/60 flex items-center justify-between">
+              <button
+                type="button"
+                onClick={handleGenerateBarcode}
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 font-bold text-xs rounded-xl flex items-center gap-1.5 transition cursor-pointer"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>Generar Auto</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleStopScanner}
+                className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs rounded-xl transition cursor-pointer"
+              >
+                Cerrar Cámara
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Búsqueda y Extracción de Fotos de Medicamento desde Internet */}
+      {showImageSearchModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-3 sm:p-4 animate-in fade-in duration-200">
+          <div className="bg-[#1e293b] border border-slate-700 rounded-2xl w-full max-w-2xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden animate-in zoom-in-95 duration-150">
+            {/* Cabecera */}
+            <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/70">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-blue-950/80 border border-blue-700/60 text-blue-400 rounded-xl">
+                  <Globe className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-black text-white text-sm">Sacar Foto de Internet</h3>
+                  <p className="text-[11px] text-slate-400">Busca cajas, envases y empaques reales de farmacia</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowImageSearchModal(false)}
+                className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Barra de Búsqueda */}
+            <div className="p-3 bg-slate-900 border-b border-slate-800">
+              <form 
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  executeImageSearch(imageSearchQuery);
+                }}
+                className="flex items-center gap-2"
+              >
+                <div className="relative flex-1">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={imageSearchQuery}
+                    onChange={(e) => setImageSearchQuery(e.target.value)}
+                    placeholder="Ej: Atamel 650mg caja / Amoxicilina 500mg cápsulas / Ibuprofeno jarabe..."
+                    className="w-full pl-9 pr-3 py-2 bg-[#0f172a] border border-slate-700 text-white rounded-xl text-xs placeholder-slate-500 focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={isSearchingImages || !imageSearchQuery.trim()}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 transition cursor-pointer shrink-0"
+                >
+                  {isSearchingImages ? (
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Search className="w-4 h-4" />
+                  )}
+                  <span>Buscar</span>
+                </button>
+              </form>
+            </div>
+
+            {/* Contenido / Cuadrícula de Imágenes */}
+            <div className="p-4 overflow-y-auto flex-1 min-h-[300px] bg-slate-950/40">
+              {isSearchingImages ? (
+                <div className="flex flex-col items-center justify-center py-16 space-y-3">
+                  <RefreshCw className="w-8 h-8 text-blue-400 animate-spin" />
+                  <p className="text-xs text-slate-300 font-medium">Buscando fotos reales del medicamento en la web...</p>
+                </div>
+              ) : imageSearchError ? (
+                <div className="p-6 text-center space-y-2">
+                  <AlertTriangle className="w-8 h-8 text-amber-400 mx-auto" />
+                  <p className="text-xs text-amber-200 font-semibold">{imageSearchError}</p>
+                  <p className="text-[11px] text-slate-400">Prueba ajustando el nombre, por ejemplo: "Atamel 500mg" o "Ibuprofeno caja".</p>
+                </div>
+              ) : imageSearchResults.length === 0 ? (
+                <div className="text-center py-16 text-slate-400 text-xs">
+                  Escribe el nombre del medicamento en la barra superior y pulsa "Buscar".
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                  {imageSearchResults.map((img, idx) => (
+                    <div
+                      key={idx}
+                      onClick={() => handleSelectOnlineImage(img.image)}
+                      className="group relative bg-[#0f172a] border border-slate-700 hover:border-blue-500 rounded-xl overflow-hidden cursor-pointer transition transform hover:scale-[1.02] shadow-sm hover:shadow-lg flex flex-col"
+                    >
+                      <div className="w-full h-32 bg-slate-900 overflow-hidden flex items-center justify-center relative">
+                        <img
+                          src={img.thumbnail || img.image}
+                          alt={img.title || 'Foto de producto'}
+                          className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
+                          loading="lazy"
+                          onError={(e) => {
+                            (e.target as HTMLElement).style.display = 'none';
+                          }}
+                        />
+                        <div className="absolute inset-0 bg-blue-600/0 group-hover:bg-blue-600/30 transition flex items-center justify-center">
+                          <span className="opacity-0 group-hover:opacity-100 bg-blue-600 text-white text-[10px] font-black px-2 py-1 rounded-md shadow-md transition transform translate-y-1 group-hover:translate-y-0">
+                            Usar Esta Foto
+                          </span>
+                        </div>
+                      </div>
+                      <div className="p-2 flex-1 flex flex-col justify-between">
+                        <p className="text-[10px] text-slate-300 line-clamp-2 leading-tight font-medium" title={img.title}>
+                          {img.title || 'Foto de medicamento'}
+                        </p>
+                        <span className="text-[9px] text-slate-500 mt-1 block">
+                          {img.source || 'Internet'}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Pie del Modal */}
+            <div className="p-3 border-t border-slate-800 bg-slate-900/70 flex items-center justify-between">
+              <span className="text-[11px] text-slate-400">
+                Toca cualquier imagen para seleccionarla y guardarla en la ficha.
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowImageSearchModal(false)}
+                className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl transition cursor-pointer"
+              >
+                Cerrar
               </button>
             </div>
           </div>
