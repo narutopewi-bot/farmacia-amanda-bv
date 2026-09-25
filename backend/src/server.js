@@ -608,7 +608,32 @@ app.delete('/api/products/:id', (req, res) => {
     if (!prod) return res.status(404).json({ error: 'Producto no encontrado' });
 
     const deleteTx = db.transaction(() => {
+      // 1. Obtener todos los IDs de los lotes del producto
+      const batchRows = db.prepare('SELECT id FROM batches WHERE product_id = ?').all(id);
+      const batchIds = batchRows.map(b => b.id);
+
+      // 2. Eliminar movimientos de stock relacionados (por batch_id o product_id)
+      if (batchIds.length > 0) {
+        const placeholders = batchIds.map(() => '?').join(',');
+        db.prepare(`DELETE FROM stock_movements WHERE batch_id IN (${placeholders})`).run(...batchIds);
+      }
+      db.prepare('DELETE FROM stock_movements WHERE product_id = ?').run(id);
+
+      // 3. Eliminar referencias en compras y pedidos online
+      db.prepare('DELETE FROM purchase_items WHERE product_id = ?').run(id);
+      db.prepare('DELETE FROM online_order_items WHERE product_id = ?').run(id);
+
+      // 4. Eliminar referencias en ventas de prueba
+      if (batchIds.length > 0) {
+        const placeholders = batchIds.map(() => '?').join(',');
+        db.prepare(`DELETE FROM sale_items WHERE batch_id IN (${placeholders})`).run(...batchIds);
+      }
+      db.prepare('DELETE FROM sale_items WHERE product_id = ?').run(id);
+
+      // 5. Eliminar lotes del producto
       db.prepare('DELETE FROM batches WHERE product_id = ?').run(id);
+
+      // 6. Eliminar la ficha del producto
       db.prepare('DELETE FROM products WHERE id = ?').run(id);
     });
 

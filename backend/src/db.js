@@ -234,8 +234,8 @@ export function initDatabase() {
 
     CREATE TABLE IF NOT EXISTS stock_movements (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      product_id INTEGER NOT NULL REFERENCES products(id),
-      batch_id INTEGER REFERENCES batches(id),
+      product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+      batch_id INTEGER REFERENCES batches(id) ON DELETE CASCADE,
       type TEXT NOT NULL, -- 'SALE', 'PURCHASE', 'ADJUSTMENT', 'TRANSFER', 'WASTE'
       quantity INTEGER NOT NULL, -- negative for out, positive for in
       reason TEXT,
