@@ -637,7 +637,7 @@ export function App() {
                 )}
 
                 {activeTab === 'reports' && (
-                  <ReportsView />
+                  <ReportsView settings={settings} />
                 )}
 
                 {activeTab === 'settings' && (

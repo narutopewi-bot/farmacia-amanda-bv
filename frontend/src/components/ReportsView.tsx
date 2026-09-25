@@ -3,10 +3,20 @@ import {
   BarChart3, DollarSign, TrendingUp, Package, 
   Calendar, CreditCard, PieChart, ArrowUpRight, Download, Filter,
   Printer, RefreshCw, Landmark, ShieldCheck, FileText, CheckCircle2,
-  Percent, ArrowRight, HelpCircle
+  Percent, ArrowRight, HelpCircle, ArrowLeft, Truck, Layers,
+  Sparkles, Check, ChevronRight
 } from 'lucide-react';
+import { Settings } from '../types';
+import { InventoryReportView } from './InventoryReportView';
+import { OnlineOrdersReportView } from './OnlineOrdersReportView';
 
-export const ReportsView: React.FC = () => {
+interface Props {
+  settings?: Settings | null;
+}
+
+export const ReportsView: React.FC<Props> = ({ settings }) => {
+  const [selectedReport, setSelectedReport] = useState<'HUB' | 'FINANCIAL' | 'INVENTORY' | 'ONLINE'>('HUB');
+
   const now = new Date();
   const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
   const todayStr = now.toISOString().split('T')[0];
@@ -77,6 +87,175 @@ export const ReportsView: React.FC = () => {
     fetchFinancialReport(s, e);
   };
 
+  // Sub-views switching
+  if (selectedReport === 'INVENTORY') {
+    return <InventoryReportView onBack={() => setSelectedReport('HUB')} />;
+  }
+
+  if (selectedReport === 'ONLINE') {
+    return <OnlineOrdersReportView settings={settings || null} onBack={() => setSelectedReport('HUB')} />;
+  }
+
+  if (selectedReport === 'HUB') {
+    return (
+      <div className="space-y-6">
+        {/* Hub Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800">
+          <div>
+            <h2 className="text-xl sm:text-2xl font-black text-white flex items-center gap-2">
+              <span className="p-2 rounded-xl bg-[#006837] text-white shadow-md text-base">
+                📊
+              </span>
+              <span>Centro de Reportes y Analítica</span>
+            </h2>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Accede a los módulos de auditoría financiera, valoración de existencias e informes de ventas.
+            </p>
+          </div>
+        </div>
+
+        {/* Catalog Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {/* Card 1: Reporte Financiero SENIAT */}
+          <div 
+            onClick={() => setSelectedReport('FINANCIAL')}
+            className="group relative bg-slate-900 hover:bg-slate-850 border border-slate-800 hover:border-emerald-600/60 rounded-2xl p-6 transition-all duration-200 cursor-pointer shadow-md hover:shadow-xl flex flex-col justify-between"
+          >
+            <div>
+              <div className="flex items-center justify-between mb-4">
+                <div className="p-3 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 group-hover:scale-110 transition-transform">
+                  <Landmark className="w-6 h-6" />
+                </div>
+                <span className="text-[10px] font-extrabold uppercase px-2.5 py-1 rounded-full bg-emerald-950/80 text-emerald-300 border border-emerald-800/80">
+                  Fiscal & Contable
+                </span>
+              </div>
+
+              <h3 className="text-lg font-black text-white group-hover:text-emerald-400 transition-colors">
+                Reportes Financieros y Fiscales (SENIAT)
+              </h3>
+              <p className="text-xs text-slate-400 mt-2 line-clamp-3">
+                Auditoría de ingresos brutos, costo de reposición de mercancía (COGS), ganancia neta real y cálculo de débito fiscal IVA para declaraciones.
+              </p>
+
+              <div className="mt-4 pt-4 border-t border-slate-800/80 space-y-1.5 text-xs text-slate-300">
+                <div className="flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                  <span>Auditoría de Ventas e Ingresos Totales</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                  <span>Cálculo de IVA y Libro de Ventas</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                  <span>Distribución de métodos de pago</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-6 pt-3 flex items-center justify-between text-xs font-black text-emerald-400 group-hover:translate-x-1 transition-transform">
+              <span>Abrir Reporte Financiero</span>
+              <ArrowRight className="w-4 h-4" />
+            </div>
+          </div>
+
+          {/* Card 2: Reporte de Inventario y Existencias */}
+          <div 
+            onClick={() => setSelectedReport('INVENTORY')}
+            className="group relative bg-slate-900 hover:bg-slate-850 border border-slate-800 hover:border-blue-600/60 rounded-2xl p-6 transition-all duration-200 cursor-pointer shadow-md hover:shadow-xl flex flex-col justify-between"
+          >
+            <div>
+              <div className="flex items-center justify-between mb-4">
+                <div className="p-3 rounded-xl bg-blue-500/10 text-blue-400 border border-blue-500/20 group-hover:scale-110 transition-transform">
+                  <Package className="w-6 h-6" />
+                </div>
+                <span className="text-[10px] font-extrabold uppercase px-2.5 py-1 rounded-full bg-blue-950/80 text-blue-300 border border-blue-800/80">
+                  Inventario & Costos
+                </span>
+              </div>
+
+              <h3 className="text-lg font-black text-white group-hover:text-blue-400 transition-colors">
+                Reportes de Inventario y Existencias
+              </h3>
+              <p className="text-xs text-slate-400 mt-2 line-clamp-3">
+                Total de artículos registrados, valoración a precio costo y venta, margen proyectado, poco stock, más vendidos y artículos sin rotación.
+              </p>
+
+              <div className="mt-4 pt-4 border-t border-slate-800/80 space-y-1.5 text-xs text-slate-300">
+                <div className="flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
+                  <span>Valoración en $ y Bs. (Tasa BCV)</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
+                  <span>Artículos con Poco Stock y Agotados</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
+                  <span>Top Más Vendidos vs Artículos Sin Rotación</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
+                  <span>Desglose por Categorías y Lotes por Vencer</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-6 pt-3 flex items-center justify-between text-xs font-black text-blue-400 group-hover:translate-x-1 transition-transform">
+              <span>Abrir Reporte de Inventario</span>
+              <ArrowRight className="w-4 h-4" />
+            </div>
+          </div>
+
+          {/* Card 3: Reporte de Ventas Web & Delivery */}
+          <div 
+            onClick={() => setSelectedReport('ONLINE')}
+            className="group relative bg-slate-900 hover:bg-slate-850 border border-slate-800 hover:border-purple-600/60 rounded-2xl p-6 transition-all duration-200 cursor-pointer shadow-md hover:shadow-xl flex flex-col justify-between"
+          >
+            <div>
+              <div className="flex items-center justify-between mb-4">
+                <div className="p-3 rounded-xl bg-purple-500/10 text-purple-400 border border-purple-500/20 group-hover:scale-110 transition-transform">
+                  <Truck className="w-6 h-6" />
+                </div>
+                <span className="text-[10px] font-extrabold uppercase px-2.5 py-1 rounded-full bg-purple-950/80 text-purple-300 border border-purple-800/80">
+                  Comercio Digital
+                </span>
+              </div>
+
+              <h3 className="text-lg font-black text-white group-hover:text-purple-400 transition-colors">
+                Reportes de Ventas Web & Delivery
+              </h3>
+              <p className="text-xs text-slate-400 mt-2 line-clamp-3">
+                Historial de pedidos recibidos por la tienda online, recaudación en divisas y bolívares, y logística de entregas a domicilio y pickup.
+              </p>
+
+              <div className="mt-4 pt-4 border-t border-slate-800/80 space-y-1.5 text-xs text-slate-300">
+                <div className="flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-purple-400" />
+                  <span>Envíos a Domicilio y Retiros en Tienda</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-purple-400" />
+                  <span>Verificación de Comprobantes de Pago</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-purple-400" />
+                  <span>Medicamentos con Mayor Demanda Online</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-6 pt-3 flex items-center justify-between text-xs font-black text-purple-400 group-hover:translate-x-1 transition-transform">
+              <span>Abrir Reporte Digital</span>
+              <ArrowRight className="w-4 h-4" />
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const summary = reportData?.summary || {};
   const totalRev = summary.totalRevenueUsd || 0;
   const totalCogs = summary.totalCogsUsd || 0;
@@ -94,16 +273,27 @@ export const ReportsView: React.FC = () => {
       
       {/* Top Header & Export Buttons */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-slate-800 print:hidden">
-        <div>
-          <h2 className="text-xl sm:text-2xl font-black text-white flex items-center gap-2">
-            <span className="p-2 rounded-xl bg-[#006837] text-white shadow-md text-base">
-              📊
-            </span>
-            <span>Reportes Financieros y Fiscales (SENIAT)</span>
-          </h2>
-          <p className="text-xs text-slate-400 mt-1">
-            Auditoría de ingresos brutos, costo de reposición de mercancía, ganancia neta real e IVA a declarar.
-          </p>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setSelectedReport('HUB')}
+            className="p-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 hover:text-white transition shadow-sm cursor-pointer flex items-center gap-1.5 text-xs font-bold mr-1"
+            title="Volver a la lista de reportes"
+          >
+            <ArrowLeft className="w-4 h-4 text-emerald-400" />
+            <span className="hidden sm:inline">Volver a Reportes</span>
+          </button>
+
+          <div>
+            <h2 className="text-xl sm:text-2xl font-black text-white flex items-center gap-2">
+              <span className="p-2 rounded-xl bg-[#006837] text-white shadow-md text-base">
+                📊
+              </span>
+              <span>Reportes Financieros y Fiscales (SENIAT)</span>
+            </h2>
+            <p className="text-xs text-slate-400 mt-1">
+              Auditoría de ingresos brutos, costo de reposición de mercancía, ganancia neta real e IVA a declarar.
+            </p>
+          </div>
         </div>
 
         <div className="flex items-center gap-2">

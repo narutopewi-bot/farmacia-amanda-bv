@@ -2656,6 +2656,145 @@ app.get('/api/reports/inventory-valuation', (req, res) => {
 });
 
 // ==========================================
+// 10.1 REPORTE COMPLETO DE INVENTARIO Y EXISTENCIAS
+// ==========================================
+app.get('/api/reports/inventory', (req, res) => {
+  try {
+    // 1. Tasa oficial BCV
+    const settings = db.prepare('SELECT exchange_rate FROM settings LIMIT 1').get() || { exchange_rate: 85.0 };
+    const bcvRate = Number(settings.exchange_rate) || 85.0;
+
+    // 2. Conteo total de artículos
+    const countRow = db.prepare('SELECT COUNT(*) as total FROM products').get();
+    const totalProducts = countRow ? countRow.total : 0;
+
+    // 3. Valoración general a costo y precio venta
+    const valuation = db.prepare(`
+      SELECT 
+        COUNT(DISTINCT p.id) as products_with_batches,
+        COALESCE(SUM(b.stock), 0) as total_units,
+        COALESCE(SUM(b.stock * b.cost_price), 0) as total_cost_usd,
+        COALESCE(SUM(b.stock * p.selling_price), 0) as total_retail_usd
+      FROM products p
+      LEFT JOIN batches b ON p.id = b.product_id
+    `).get();
+
+    const totalUnits = Number(valuation.total_units) || 0;
+    const totalCostUsd = Number(valuation.total_cost_usd) || 0;
+    const totalRetailUsd = Number(valuation.total_retail_usd) || 0;
+    const projectedProfitUsd = totalRetailUsd - totalCostUsd;
+    const marginPct = totalRetailUsd > 0 ? ((projectedProfitUsd / totalRetailUsd) * 100).toFixed(1) : '0.0';
+
+    // 4. Artículos con poco stock o agotados (total_stock <= min_stock)
+    const lowStockItems = db.prepare(`
+      SELECT 
+        p.id, p.code, p.name, p.generic_name, p.category, p.presentation, p.laboratory,
+        p.min_stock, p.cost_price, p.selling_price, p.warehouse_location,
+        COALESCE(SUM(b.stock), 0) as total_stock,
+        CASE 
+          WHEN COALESCE(SUM(b.stock), 0) <= 0 THEN 'OUT'
+          ELSE 'LOW'
+        END as stock_status
+      FROM products p
+      LEFT JOIN batches b ON p.id = b.product_id
+      GROUP BY p.id
+      HAVING total_stock <= p.min_stock
+      ORDER BY total_stock ASC, p.name ASC
+    `).all();
+
+    // 5. Artículos más vendidos (Top ventas / Mayor rotación)
+    const topSellers = db.prepare(`
+      SELECT 
+        p.id, p.code, p.name, p.generic_name, p.category, p.presentation,
+        p.selling_price, p.cost_price,
+        COALESCE(SUM(si.quantity), 0) as total_units_sold,
+        COALESCE(SUM(si.subtotal), 0) as total_revenue_usd,
+        COALESCE((SELECT SUM(stock) FROM batches WHERE product_id = p.id), 0) as current_stock
+      FROM products p
+      JOIN sale_items si ON p.id = si.product_id
+      GROUP BY p.id
+      HAVING total_units_sold > 0
+      ORDER BY total_units_sold DESC, total_revenue_usd DESC
+      LIMIT 25
+    `).all();
+
+    // 6. Artículos que no se han vendido ("Huesos" / Cero rotación)
+    const deadStock = db.prepare(`
+      SELECT 
+        p.id, p.code, p.name, p.generic_name, p.category, p.presentation, p.laboratory,
+        p.cost_price, p.selling_price, p.warehouse_location, p.created_at,
+        COALESCE(SUM(b.stock), 0) as current_stock,
+        COALESCE(SUM(b.stock * b.cost_price), 0) as locked_capital_usd
+      FROM products p
+      LEFT JOIN batches b ON p.id = b.product_id
+      WHERE p.id NOT IN (SELECT DISTINCT product_id FROM sale_items)
+      GROUP BY p.id
+      ORDER BY current_stock DESC, locked_capital_usd DESC, p.name ASC
+      LIMIT 50
+    `).all();
+
+    // 7. Resumen de inventario por categoría
+    const categories = db.prepare(`
+      SELECT 
+        p.category,
+        COUNT(DISTINCT p.id) as products_count,
+        COALESCE(SUM(b.stock), 0) as units_count,
+        COALESCE(SUM(b.stock * b.cost_price), 0) as cost_usd,
+        COALESCE(SUM(b.stock * p.selling_price), 0) as retail_usd
+      FROM products p
+      LEFT JOIN batches b ON p.id = b.product_id
+      GROUP BY p.category
+      ORDER BY cost_usd DESC
+    `).all();
+
+    // 8. Lotes próximos a vencer (< 60 días) o vencidos
+    const now = new Date();
+    const todayStr = now.toISOString().split('T')[0];
+    const in60Days = new Date(now.getTime() + 60 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+    const expiringBatches = db.prepare(`
+      SELECT 
+        b.id, b.batch_number, b.expiry_date, b.stock, b.cost_price,
+        p.id as product_id, p.name as product_name, p.code as product_code, p.category,
+        CASE 
+          WHEN b.expiry_date < ? THEN 'EXPIRED'
+          ELSE 'EXPIRING'
+        END as status
+      FROM batches b
+      JOIN products p ON b.product_id = p.id
+      WHERE b.stock > 0 AND b.expiry_date <= ?
+      ORDER BY b.expiry_date ASC
+      LIMIT 30
+    `).all(todayStr, in60Days);
+
+    res.json({
+      summary: {
+        total_products: totalProducts,
+        total_units: totalUnits,
+        valuation_cost_usd: totalCostUsd,
+        valuation_cost_bs: totalCostUsd * bcvRate,
+        valuation_retail_usd: totalRetailUsd,
+        valuation_retail_bs: totalRetailUsd * bcvRate,
+        projected_profit_usd: projectedProfitUsd,
+        projected_profit_bs: projectedProfitUsd * bcvRate,
+        margin_percentage: marginPct,
+        low_stock_count: lowStockItems.length,
+        out_of_stock_count: lowStockItems.filter(i => i.stock_status === 'OUT').length,
+        dead_stock_count: deadStock.length,
+        bcv_rate: bcvRate
+      },
+      low_stock_items: lowStockItems,
+      top_sellers: topSellers,
+      dead_stock: deadStock,
+      categories: categories,
+      expiring_batches: expiringBatches
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ==========================================
 // 10.1 REPORTE FINANCIERO Y FISCAL (SENIAT)
 // ==========================================
 app.get('/api/reports/financial', (req, res) => {

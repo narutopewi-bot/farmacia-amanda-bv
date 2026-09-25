@@ -7,15 +7,16 @@ import {
   Eye, 
   Clock, 
   Package, 
-  CreditCard,
-  FileText,
-  MapPin,
-  Phone,
-  User,
-  RefreshCw,
-  Image as ImageIcon,
-  CheckCircle2,
-  X
+  CreditCard, 
+  FileText, 
+  MapPin, 
+  Phone, 
+  User, 
+  RefreshCw, 
+  Image as ImageIcon, 
+  CheckCircle2, 
+  X,
+  ArrowLeft
 } from 'lucide-react';
 import { OnlineOrder, Settings } from '../types';
 
@@ -56,9 +57,10 @@ interface OnlineSalesReportData {
 
 interface Props {
   settings: Settings | null;
+  onBack?: () => void;
 }
 
-export const OnlineOrdersReportView: React.FC<Props> = ({ settings }) => {
+export const OnlineOrdersReportView: React.FC<Props> = ({ settings, onBack }) => {
   const [data, setData] = useState<OnlineSalesReportData | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [startDate, setStartDate] = useState<string>('');
@@ -122,6 +124,16 @@ export const OnlineOrdersReportView: React.FC<Props> = ({ settings }) => {
       <div className="bg-slate-900 p-5 rounded-2xl border border-slate-800 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-3">
+            {onBack && (
+              <button
+                onClick={onBack}
+                className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white transition shadow-sm cursor-pointer flex items-center gap-1.5 text-xs font-bold mr-1"
+                title="Volver a la lista de reportes"
+              >
+                <ArrowLeft className="w-4 h-4 text-emerald-400" />
+                <span className="hidden sm:inline">Volver a Reportes</span>
+              </button>
+            )}
             <div className="p-2.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-xl">
               <Truck className="w-6 h-6" />
             </div>
