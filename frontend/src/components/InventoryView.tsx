@@ -436,11 +436,43 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ products, categori
 
   const handleSaveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    const cleanCode = formData.code.trim();
+    const cleanName = formData.name.trim();
+
+    if (!cleanCode) {
+      alert('⚠️ El código de barras es obligatorio.');
+      return;
+    }
+
+    if (!cleanName) {
+      alert('⚠️ El nombre comercial del medicamento es obligatorio.');
+      return;
+    }
+
+    // 1. Validar que no exista otro producto con el mismo código de barras
+    const duplicateCode = products.find(p => 
+      p.id !== editingProduct?.id && p.code.trim().toLowerCase() === cleanCode.toLowerCase()
+    );
+    if (duplicateCode) {
+      alert(`⚠️ El código de barras "${cleanCode}" ya está registrado para el artículo "${duplicateCode.name}". No pueden existir dos medicamentos con el mismo código.`);
+      return;
+    }
+
+    // 2. Validar que no exista otro producto con el mismo nombre comercial
+    const duplicateName = products.find(p => 
+      p.id !== editingProduct?.id && p.name.trim().toLowerCase() === cleanName.toLowerCase()
+    );
+    if (duplicateName) {
+      alert(`⚠️ El medicamento "${cleanName}" ya está registrado en el inventario con el código "${duplicateName.code}". No se permiten dos medicamentos con el mismo nombre comercial.`);
+      return;
+    }
+
     setIsSubmittingProduct(true);
     try {
       const payload: any = {
-        code: formData.code.trim(),
-        name: formData.name.trim(),
+        code: cleanCode,
+        name: cleanName,
         generic_name: formData.generic_name.trim(),
         category: formData.category,
         presentation: formData.presentation.trim(),

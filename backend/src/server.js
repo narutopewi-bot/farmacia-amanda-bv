@@ -519,6 +519,32 @@ app.post('/api/products', (req, res) => {
       has_iva, iva_percent, profit_margin
     } = req.body;
 
+    const cleanCode = (code || '').trim();
+    const cleanName = (name || '').trim();
+
+    if (!cleanCode) {
+      return res.status(400).json({ error: 'El código de barras es obligatorio.' });
+    }
+    if (!cleanName) {
+      return res.status(400).json({ error: 'El nombre comercial del medicamento es obligatorio.' });
+    }
+
+    // 1. Validar código duplicado (insensible a mayúsculas y espacios)
+    const duplicateCode = db.prepare('SELECT id, name, code FROM products WHERE LOWER(TRIM(code)) = LOWER(?)').get(cleanCode);
+    if (duplicateCode) {
+      return res.status(400).json({ 
+        error: `El código de barras "${cleanCode}" ya está registrado para el artículo "${duplicateCode.name}". No pueden existir dos artículos con el mismo código.` 
+      });
+    }
+
+    // 2. Validar nombre comercial duplicado (insensible a mayúsculas y espacios)
+    const duplicateName = db.prepare('SELECT id, name, code FROM products WHERE LOWER(TRIM(name)) = LOWER(?)').get(cleanName);
+    if (duplicateName) {
+      return res.status(400).json({ 
+        error: `El medicamento "${cleanName}" ya está registrado en el sistema con el código "${duplicateName.code}". No se permiten dos medicamentos con el mismo nombre comercial.` 
+      });
+    }
+
     const numCost = Number(cost_price) || 0;
     const numSelling = Number(selling_price) || 0;
     const calcMargin = profit_margin !== undefined && profit_margin !== null && profit_margin !== '' 
@@ -534,9 +560,9 @@ app.post('/api/products', (req, res) => {
     `);
 
     const result = insertProd.run(
-      code, name, generic_name || '', category, presentation || '', laboratory || '',
+      cleanCode, cleanName, generic_name ? generic_name.trim() : '', category, presentation ? presentation.trim() : '', laboratory ? laboratory.trim() : '',
       prescription_required ? 1 : 0, numCost, numSelling,
-      Number(min_stock) || 5, image_url || '', description || '', warehouse_location || '',
+      Number(min_stock) || 5, image_url || '', description ? description.trim() : '', warehouse_location ? warehouse_location.trim() : '',
       has_iva ? 1 : 0, Number(iva_percent) || 16.0, calcMargin
     );
 
@@ -566,11 +592,38 @@ app.post('/api/products', (req, res) => {
 
 app.put('/api/products/:id', (req, res) => {
   try {
+    const { id } = req.params;
     const {
       code, name, generic_name, category, presentation, laboratory,
       prescription_required, cost_price, selling_price, min_stock,
       image_url, description, warehouse_location, has_iva, iva_percent, profit_margin
     } = req.body;
+
+    const cleanCode = (code || '').trim();
+    const cleanName = (name || '').trim();
+
+    if (!cleanCode) {
+      return res.status(400).json({ error: 'El código de barras es obligatorio.' });
+    }
+    if (!cleanName) {
+      return res.status(400).json({ error: 'El nombre comercial del medicamento es obligatorio.' });
+    }
+
+    // 1. Validar código duplicado en otro producto distinto
+    const duplicateCode = db.prepare('SELECT id, name, code FROM products WHERE LOWER(TRIM(code)) = LOWER(?) AND id != ?').get(cleanCode, id);
+    if (duplicateCode) {
+      return res.status(400).json({ 
+        error: `El código "${cleanCode}" ya pertenece al artículo "${duplicateCode.name}". Cada medicamento debe tener un código único.` 
+      });
+    }
+
+    // 2. Validar nombre comercial duplicado en otro producto distinto
+    const duplicateName = db.prepare('SELECT id, name, code FROM products WHERE LOWER(TRIM(name)) = LOWER(?) AND id != ?').get(cleanName, id);
+    if (duplicateName) {
+      return res.status(400).json({ 
+        error: `El nombre "${cleanName}" ya pertenece a otro medicamento registrado (Código: ${duplicateName.code}). No se permiten dos medicamentos con el mismo nombre comercial.` 
+      });
+    }
 
     const numCost = Number(cost_price) || 0;
     const numSelling = Number(selling_price) || 0;
@@ -586,14 +639,14 @@ app.put('/api/products/:id', (req, res) => {
         has_iva = ?, iva_percent = ?, profit_margin = ?
       WHERE id = ?
     `).run(
-      code, name, generic_name || '', category, presentation || '', laboratory || '',
+      cleanCode, cleanName, generic_name ? generic_name.trim() : '', category, presentation ? presentation.trim() : '', laboratory ? laboratory.trim() : '',
       prescription_required ? 1 : 0, numCost, numSelling,
-      Number(min_stock) || 5, image_url || '', description || '', warehouse_location || '',
+      Number(min_stock) || 5, image_url || '', description ? description.trim() : '', warehouse_location ? warehouse_location.trim() : '',
       has_iva ? 1 : 0, Number(iva_percent) || 16.0, calcMargin,
-      req.params.id
+      id
     );
 
-    const updated = getProductWithStock(req.params.id);
+    const updated = getProductWithStock(id);
     io.emit('stock_updated', updated);
     res.json(updated);
   } catch (err) {
