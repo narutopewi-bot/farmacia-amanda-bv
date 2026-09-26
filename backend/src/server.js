@@ -537,14 +537,6 @@ app.post('/api/products', (req, res) => {
       });
     }
 
-    // 2. Validar nombre comercial duplicado (insensible a mayúsculas y espacios)
-    const duplicateName = db.prepare('SELECT id, name, code FROM products WHERE LOWER(TRIM(name)) = LOWER(?)').get(cleanName);
-    if (duplicateName) {
-      return res.status(400).json({ 
-        error: `El medicamento "${cleanName}" ya está registrado en el sistema con el código "${duplicateName.code}". No se permiten dos medicamentos con el mismo nombre comercial.` 
-      });
-    }
-
     const numCost = Number(cost_price) || 0;
     const numSelling = Number(selling_price) || 0;
     const calcMargin = profit_margin !== undefined && profit_margin !== null && profit_margin !== '' 
@@ -592,7 +584,7 @@ app.post('/api/products', (req, res) => {
 
 app.put('/api/products/:id', (req, res) => {
   try {
-    const { id } = req.params;
+    const productId = Number(req.params.id);
     const {
       code, name, generic_name, category, presentation, laboratory,
       prescription_required, cost_price, selling_price, min_stock,
@@ -610,18 +602,10 @@ app.put('/api/products/:id', (req, res) => {
     }
 
     // 1. Validar código duplicado en otro producto distinto
-    const duplicateCode = db.prepare('SELECT id, name, code FROM products WHERE LOWER(TRIM(code)) = LOWER(?) AND id != ?').get(cleanCode, id);
+    const duplicateCode = db.prepare('SELECT id, name, code FROM products WHERE LOWER(TRIM(code)) = LOWER(?) AND id != ?').get(cleanCode, productId);
     if (duplicateCode) {
       return res.status(400).json({ 
         error: `El código "${cleanCode}" ya pertenece al artículo "${duplicateCode.name}". Cada medicamento debe tener un código único.` 
-      });
-    }
-
-    // 2. Validar nombre comercial duplicado en otro producto distinto
-    const duplicateName = db.prepare('SELECT id, name, code FROM products WHERE LOWER(TRIM(name)) = LOWER(?) AND id != ?').get(cleanName, id);
-    if (duplicateName) {
-      return res.status(400).json({ 
-        error: `El nombre "${cleanName}" ya pertenece a otro medicamento registrado (Código: ${duplicateName.code}). No se permiten dos medicamentos con el mismo nombre comercial.` 
       });
     }
 
@@ -643,10 +627,10 @@ app.put('/api/products/:id', (req, res) => {
       prescription_required ? 1 : 0, numCost, numSelling,
       Number(min_stock) || 5, image_url || '', description ? description.trim() : '', warehouse_location ? warehouse_location.trim() : '',
       has_iva ? 1 : 0, Number(iva_percent) || 16.0, calcMargin,
-      id
+      productId
     );
 
-    const updated = getProductWithStock(id);
+    const updated = getProductWithStock(productId);
     io.emit('stock_updated', updated);
     res.json(updated);
   } catch (err) {

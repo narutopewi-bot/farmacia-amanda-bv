@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { 
   Package, Plus, Search, Filter, AlertTriangle, 
-  Calendar, ShieldAlert, Edit2, Layers, CheckCircle, X,
+  Calendar, ShieldAlert, Edit2, Layers, CheckCircle, CheckCircle2, X,
   Upload, Image as ImageIcon, Camera, Trash2, HelpCircle, Sparkles, Check,
   ScanLine, Globe, RefreshCw
 } from 'lucide-react';
@@ -217,8 +217,13 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ products, categori
   };
 
   const handleGenerateBarcode = () => {
-    const randomSuffix = Math.floor(1000000000 + Math.random() * 9000000000).toString();
-    const generated = `759${randomSuffix.slice(0, 9)}`;
+    let generated = '';
+    let attempts = 0;
+    do {
+      const randomSuffix = Math.floor(1000000000 + Math.random() * 9000000000).toString();
+      generated = `759${randomSuffix.slice(0, 9)}`;
+      attempts++;
+    } while (products.some(p => p.code.trim().toLowerCase() === generated.toLowerCase()) && attempts < 100);
     setFormData(prev => ({ ...prev, code: generated }));
   };
 
@@ -401,8 +406,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ products, categori
 
   const handleOpenEditProduct = (prod: Product) => {
     setEditingProduct(prod);
-    const numCost = prod.cost_price ? prod.cost_price.toString() : '';
-    const numSelling = prod.selling_price ? prod.selling_price.toString() : '';
+    const numCost = (prod.cost_price !== undefined && prod.cost_price !== null) ? prod.cost_price.toString() : '';
+    const numSelling = (prod.selling_price !== undefined && prod.selling_price !== null) ? prod.selling_price.toString() : '';
     let marginStr = '50';
     if (prod.profit_margin !== undefined && prod.profit_margin !== null) {
       marginStr = prod.profit_margin.toString();
@@ -417,13 +422,13 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ products, categori
       category: prod.category || availableCategoryNames[0] || 'General',
       presentation: prod.presentation || '',
       laboratory: prod.laboratory || '',
-      prescription_required: prod.prescription_required === 1,
+      prescription_required: Boolean(prod.prescription_required),
       cost_price: numCost,
       profit_margin: marginStr,
       selling_price: numSelling,
-      has_iva: prod.has_iva === 1,
+      has_iva: Boolean(prod.has_iva),
       iva_percent: prod.iva_percent !== undefined ? prod.iva_percent : 16,
-      min_stock: prod.min_stock !== undefined ? prod.min_stock.toString() : '5',
+      min_stock: (prod.min_stock !== undefined && prod.min_stock !== null) ? prod.min_stock.toString() : '5',
       image_url: prod.image_url || '',
       description: prod.description || '',
       warehouse_location: prod.warehouse_location || '',
@@ -433,6 +438,12 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ products, categori
     });
     setShowNewProductModal(true);
   };
+
+  // Validación de duplicidad de código en tiempo real
+  const cleanCodeInput = formData.code.trim();
+  const matchingProductByCode = cleanCodeInput
+    ? products.find(p => p.code.trim().toLowerCase() === cleanCodeInput.toLowerCase() && p.id !== editingProduct?.id)
+    : null;
 
   const handleSaveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -455,16 +466,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ products, categori
       p.id !== editingProduct?.id && p.code.trim().toLowerCase() === cleanCode.toLowerCase()
     );
     if (duplicateCode) {
-      alert(`⚠️ El código de barras "${cleanCode}" ya está registrado para el artículo "${duplicateCode.name}". No pueden existir dos medicamentos con el mismo código.`);
-      return;
-    }
-
-    // 2. Validar que no exista otro producto con el mismo nombre comercial
-    const duplicateName = products.find(p => 
-      p.id !== editingProduct?.id && p.name.trim().toLowerCase() === cleanName.toLowerCase()
-    );
-    if (duplicateName) {
-      alert(`⚠️ El medicamento "${cleanName}" ya está registrado en el inventario con el código "${duplicateName.code}". No se permiten dos medicamentos con el mismo nombre comercial.`);
+      alert(`⚠️ El código de barras "${cleanCode}" ya está registrado para el artículo "${duplicateCode.name}". Cada medicamento debe tener un código de barras único.`);
       return;
     }
 
@@ -915,11 +917,53 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ products, categori
                     value={formData.code}
                     onChange={e => setFormData({ ...formData, code: e.target.value })}
                     placeholder="Ej: 7591001099"
-                    className="w-full p-2 bg-[#0f172a] border border-slate-700 text-white placeholder-slate-500 rounded-lg focus:ring-2 focus:ring-emerald-500 font-mono text-xs"
+                    className={`w-full p-2 bg-[#0f172a] border ${
+                      matchingProductByCode 
+                        ? 'border-amber-500 focus:ring-amber-500 text-amber-200' 
+                        : 'border-slate-700 focus:ring-emerald-500 text-white'
+                    } placeholder-slate-500 rounded-lg focus:ring-2 font-mono text-xs`}
                   />
-                  <span className="text-[10px] text-slate-400 mt-0.5 block">
-                    Escanea con la cámara del celular, pistola láser o usa código automático.
-                  </span>
+
+                  {/* Alerta interactiva de duplicidad en tiempo real */}
+                  {matchingProductByCode ? (
+                    <div className="mt-1.5 p-2.5 rounded-xl bg-amber-500/15 border border-amber-500/40 text-amber-200 animate-in fade-in slide-in-from-top-1 duration-150 space-y-1.5">
+                      <div className="flex items-start gap-1.5">
+                        <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                        <div className="text-[11px] leading-tight">
+                          <span className="font-bold text-amber-300">¡Código ya asignado!</span> Pertenece a: <strong className="text-white underline">{matchingProductByCode.name}</strong>
+                          {matchingProductByCode.laboratory && (
+                            <span className="text-slate-300"> (Lab: {matchingProductByCode.laboratory})</span>
+                          )}
+                          {matchingProductByCode.presentation && (
+                            <span className="text-slate-300"> • {matchingProductByCode.presentation}</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between gap-2 pt-1 border-t border-amber-500/20">
+                        <span className="text-[10px] text-amber-300/80">¿Deseas modificarlo?</span>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenEditProduct(matchingProductByCode)}
+                          className="px-2.5 py-1 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-lg text-[10px] flex items-center gap-1 transition shadow-xs cursor-pointer active:scale-95"
+                          title="Cargar y modificar este artículo que ya tiene este código asignado"
+                        >
+                          <Edit2 className="w-3 h-3 text-slate-950" />
+                          <span>Modificar este artículo existente</span>
+                        </button>
+                      </div>
+                    </div>
+                  ) : formData.code.trim().length > 0 ? (
+                    <span className="text-[10px] text-emerald-400 font-bold flex items-center gap-1 mt-1">
+                      <CheckCircle2 className="w-3 h-3" />
+                      {editingProduct && editingProduct.code.trim().toLowerCase() === formData.code.trim().toLowerCase()
+                        ? 'Código actual de este medicamento'
+                        : 'Código disponible y único'}
+                    </span>
+                  ) : (
+                    <span className="text-[10px] text-slate-400 mt-0.5 block">
+                      Escanea con la cámara del celular, pistola láser o usa código automático.
+                    </span>
+                  )}
                 </div>
                 <div className="sm:col-span-2">
                   <div className="flex items-center justify-between mb-1">
@@ -1413,10 +1457,16 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ products, categori
                   </button>
                   <button
                     type="submit"
-                    disabled={isSubmittingProduct}
-                    className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl shadow-md cursor-pointer active:scale-98 transition disabled:opacity-50 flex items-center gap-1.5"
+                    disabled={isSubmittingProduct || !!matchingProductByCode}
+                    className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl shadow-md cursor-pointer active:scale-98 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
                   >
-                    <span>{isSubmittingProduct ? 'Guardando...' : (editingProduct ? 'Guardar Cambios' : 'Guardar Medicamento')}</span>
+                    <span>
+                      {matchingProductByCode 
+                        ? 'Código ya asignado a otro artículo' 
+                        : (isSubmittingProduct 
+                            ? 'Guardando...' 
+                            : (editingProduct ? 'Guardar Cambios' : 'Guardar Medicamento'))}
+                    </span>
                   </button>
                 </div>
               </div>
