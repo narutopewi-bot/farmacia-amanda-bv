@@ -10,6 +10,8 @@ dist
 # Executables & Binaries
 cloudflared.exe
 *.exe
+!Instalador_Caja_Principal.exe
+!Farmacia_Amanda.exe
 
 # Logs & Temp
 *.log

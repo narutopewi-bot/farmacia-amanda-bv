@@ -1,7 +1,6 @@
 @echo off
 title Farmacia Amanda - CAJA PRINCIPAL
 color 0A
-chcp 65001 > nul
 
 echo =========================================================================
 echo       EXPENDIO DE MEDICINAS AMANDA B&V C.A. - CAJA PRINCIPAL
@@ -11,13 +10,11 @@ echo.
 
 cd /d "%~dp0backend"
 
-REM Verificar Node.js
 where node >nul 2>nul
 if %errorlevel% neq 0 (
     echo [ERROR] Node.js no esta instalado en este equipo.
-    echo Por favor instala Node.js LTS desde: https://nodejs.org
-    echo Presiona cualquier tecla para salir...
-    pause > nul
+    echo Por favor ejecuta primero: INSTALAR_CAJA_PRINCIPAL.bat
+    pause
     exit /b
 )
 
@@ -34,14 +31,13 @@ if %errorlevel% neq 0 (
 )
 
 echo [3/3] Abriendo pantalla de cobro de la Caja Principal...
-REM Intentar abrir en modo aplicacion de escritorio limpia con Edge o Chrome
 start "" msedge --app=http://localhost:5000 || start "" chrome --app=http://localhost:5000 || start "" http://localhost:5000
 
 echo.
 echo =========================================================================
-echo  ??? CAJA PRINCIPAL OPERATIVA AL 100%%
-echo  ??? Puedes vender y facturar con o sin internet.
-echo  ??? Al volver el internet, las ventas suben automaticamente a Railway.
+echo  [OK] CAJA PRINCIPAL OPERATIVA AL 100%%
+echo  [OK] Puedes vender y facturar con o sin internet.
+echo  [OK] Al volver el internet, las ventas suben automaticamente a Railway.
 echo  (Para cerrar el sistema cuando termine el dia, cierra esta ventana).
 echo =========================================================================
 echo.
