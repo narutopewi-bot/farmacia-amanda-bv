@@ -3038,6 +3038,151 @@ app.get('/api/reports/online-sales', (req, res) => {
   }
 });
 
+// =========================================================================
+// 12. ENDPOINTS DE SINCRONIZACIÓN CAJA LOCAL - NUBE (OFFLINE-FIRST)
+// =========================================================================
+
+// 1. Exportar snapshot completo de la nube para clonar o actualizar la Caja Local
+app.get('/api/sync/export-full', (req, res) => {
+  try {
+    const settings = db.prepare('SELECT * FROM settings WHERE id = 1').get() || {};
+    const categories = db.prepare('SELECT * FROM categories').all();
+    const employees = db.prepare('SELECT id, name, id_number, phone, role, shift, active, username, pin, permissions FROM employees').all();
+    const customers = db.prepare('SELECT * FROM customers').all();
+    const suppliers = db.prepare('SELECT * FROM suppliers').all();
+    const warehouses = db.prepare('SELECT * FROM warehouses').all();
+    const products = db.prepare('SELECT * FROM products').all();
+    const batches = db.prepare('SELECT * FROM batches').all();
+
+    res.json({
+      timestamp: new Date().toISOString(),
+      counts: {
+        products: products.length,
+        batches: batches.length,
+        categories: categories.length,
+        employees: employees.length
+      },
+      settings,
+      categories,
+      employees,
+      customers,
+      suppliers,
+      warehouses,
+      products,
+      batches
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 2. Recibir ventas hechas offline en la Caja Local e importarlas en la nube
+app.post('/api/sync/push-sales', (req, res) => {
+  try {
+    const { sales } = req.body;
+    if (!Array.isArray(sales) || sales.length === 0) {
+      return res.json({ success: true, count: 0, message: 'No hay ventas para sincronizar' });
+    }
+
+    let importedCount = 0;
+    const insertTx = db.transaction(() => {
+      for (const sale of sales) {
+        // Verificar si la venta ya existe por número de factura
+        const existing = db.prepare('SELECT id FROM sales WHERE invoice_number = ?').get(sale.invoice_number);
+        if (existing) continue;
+
+        // Insertar venta en la nube
+        const saleResult = db.prepare(`
+          INSERT INTO sales (
+            invoice_number, customer_id, employee_id, cash_register_id,
+            sale_type, payment_method, subtotal, discount, tax, total,
+            amount_paid, change_given, is_credit, notes, created_at, sync_status
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'SYNCED')
+        `).run(
+          sale.invoice_number,
+          sale.customer_id || null,
+          sale.employee_id || null,
+          sale.cash_register_id || null,
+          sale.sale_type || 'DIRECT',
+          sale.payment_method || 'CASH',
+          sale.subtotal || 0,
+          sale.discount || 0,
+          sale.tax || 0,
+          sale.total || 0,
+          sale.amount_paid || sale.total || 0,
+          sale.change_given || 0,
+          sale.is_credit ? 1 : 0,
+          sale.notes || 'Venta sincronizada desde Caja Local Offline',
+          sale.created_at || new Date().toISOString()
+        );
+
+        const newSaleId = saleResult.lastInsertRowid;
+
+        // Insertar items y descontar inventario
+        if (Array.isArray(sale.items)) {
+          for (const item of sale.items) {
+            db.prepare(`
+              INSERT INTO sale_items (sale_id, product_id, batch_id, quantity, unit_price, unit_cost, subtotal)
+              VALUES (?, ?, ?, ?, ?, ?, ?)
+            `).run(
+              newSaleId,
+              item.product_id,
+              item.batch_id || null,
+              item.quantity,
+              item.unit_price,
+              item.unit_cost || 0,
+              item.subtotal
+            );
+
+            // Descontar del lote si existe
+            if (item.batch_id) {
+              db.prepare('UPDATE batches SET stock = MAX(0, stock - ?) WHERE id = ?').run(item.quantity, item.batch_id);
+            } else if (item.product_id) {
+              // Descontar del lote más próximo a vencer
+              const batch = db.prepare('SELECT id, stock FROM batches WHERE product_id = ? AND stock > 0 ORDER BY expiry_date ASC LIMIT 1').get(item.product_id);
+              if (batch) {
+                db.prepare('UPDATE batches SET stock = MAX(0, stock - ?) WHERE id = ?').run(item.quantity, batch.id);
+              }
+            }
+          }
+        }
+        importedCount++;
+      }
+    });
+
+    insertTx();
+
+    res.json({
+      success: true,
+      imported_count: importedCount,
+      message: `${importedCount} ventas sincronizadas exitosamente en la nube`
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 3. Estado de sincronización del nodo actual
+app.get('/api/sync/status', (req, res) => {
+  try {
+    const isCloud = !!process.env.RAILWAY_ENVIRONMENT;
+    let pendingCount = 0;
+    try {
+      const row = db.prepare("SELECT COUNT(*) as count FROM sales WHERE sync_status = 'PENDING'").get();
+      pendingCount = row ? row.count : 0;
+    } catch (e) {}
+
+    res.json({
+      node_type: isCloud ? 'CLOUD' : 'LOCAL_POS',
+      is_cloud: isCloud,
+      pending_sales_to_sync: pendingCount,
+      cloud_url: 'https://expendiodemedicinaamandabv.com'
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Serve production frontend assets if dist exists
 if (fs.existsSync(distPath)) {
   app.use(express.static(distPath));

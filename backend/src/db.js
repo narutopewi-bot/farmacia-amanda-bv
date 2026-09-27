@@ -348,6 +348,7 @@ export function initDatabase() {
   try { db.exec("ALTER TABLE cash_registers ADD COLUMN usuario_cierre_nombre TEXT DEFAULT ''"); } catch(e){}
   try { db.exec("ALTER TABLE credit_payments ADD COLUMN cash_register_id INTEGER"); } catch(e){}
   try { db.exec("ALTER TABLE credit_payments ADD COLUMN amount_bs REAL DEFAULT 0.0"); } catch(e){}
+  try { db.exec("ALTER TABLE sales ADD COLUMN sync_status TEXT DEFAULT 'PENDING'"); } catch(e){}
 
   // Employees permissions column migration
   try { db.exec("ALTER TABLE employees ADD COLUMN permissions TEXT DEFAULT '[]'"); } catch(e){}
