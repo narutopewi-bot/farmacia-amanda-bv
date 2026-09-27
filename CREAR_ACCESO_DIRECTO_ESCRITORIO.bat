@@ -1,27 +1,18 @@
 @echo off
 title Crear Acceso Directo - Farmacia Amanda
 color 0B
-chcp 65001 > nul
 
-set TARGET=%~dp0INICIAR_CAJA_PRINCIPAL.bat
-set SCRIPT=%TEMP%\CreateShortcut_%RANDOM%.vbs
+echo =========================================================================
+echo       CREANDO ACCESO DIRECTO EN EL ESCRITORIO DE WINDOWS
+echo =========================================================================
+echo.
 
-echo Set oWS = WScript.CreateObject("WScript.Shell") >> "%SCRIPT%"
-echo sLinkFile = oWS.SpecialFolders("Desktop") ^& "\Farmacia Amanda - CAJA PRINCIPAL.lnk" >> "%SCRIPT%"
-echo Set oLink = oWS.CreateShortcut(sLinkFile) >> "%SCRIPT%"
-echo oLink.TargetPath = "%TARGET%" >> "%SCRIPT%"
-echo oLink.WorkingDirectory = "%~dp0" >> "%SCRIPT%"
-echo oLink.Description = "Expendio de Medicinas Amanda B&V - Caja Principal Offline" >> "%SCRIPT%"
-echo oLink.IconLocation = "shell32.dll, 43" >> "%SCRIPT%"
-echo oLink.Save >> "%SCRIPT%"
-
-cscript /nologo "%SCRIPT%"
-del "%SCRIPT%"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut("$([Environment]::GetFolderPath('Desktop'))\Farmacia Amanda - CAJA PRINCIPAL.lnk"); $s.TargetPath = '%~dp0INICIAR_CAJA_PRINCIPAL.bat'; $s.WorkingDirectory = '%~dp0'; $s.IconLocation = 'shell32.dll,43'; $s.Description = 'Expendio de Medicinas Amanda B&V - Caja Principal Offline'; $s.Save()"
 
 echo.
 echo =========================================================================
-echo  ✓ Acceso directo creado exitosamente en tu Escritorio de Windows!
-echo  Icono: "Farmacia Amanda - CAJA PRINCIPAL"
+echo  [OK] Acceso directo creado exitosamente en tu Escritorio de Windows!
+echo  Busca el icono con el nombre: 'Farmacia Amanda - CAJA PRINCIPAL'
 echo =========================================================================
 echo.
 pause

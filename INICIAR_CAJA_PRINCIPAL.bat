@@ -39,9 +39,9 @@ start "" msedge --app=http://localhost:5000 || start "" chrome --app=http://loca
 
 echo.
 echo =========================================================================
-echo  ✓ CAJA PRINCIPAL OPERATIVA AL 100%%
-echo  ✓ Puedes vender y facturar con o sin internet.
-echo  ✓ Al volver el internet, las ventas suben automaticamente a Railway.
+echo  ??? CAJA PRINCIPAL OPERATIVA AL 100%%
+echo  ??? Puedes vender y facturar con o sin internet.
+echo  ??? Al volver el internet, las ventas suben automaticamente a Railway.
 echo  (Para cerrar el sistema cuando termine el dia, cierra esta ventana).
 echo =========================================================================
 echo.

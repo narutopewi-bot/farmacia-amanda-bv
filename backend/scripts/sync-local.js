@@ -67,7 +67,7 @@ export async function runLocalSync(options = { initial: false, push: true, pull:
     // 3. PULL: Descargar medicamentos, lotes y configuración de la nube
     if (options.pull) {
       console.log('[SYNC LOCAL] Descargando catálogo y existencias actualizadas desde Railway...');
-      const pullRes = await fetch(`${CLOUD_URL}/api/sync/export-full`, { signal: AbortSignal.timeout(15000) });
+      const pullRes = await fetch(`${CLOUD_URL}/api/sync/export-full`, { signal: AbortSignal.timeout(60000) });
       if (pullRes.ok) {
         const cloudData = await pullRes.json();
 
