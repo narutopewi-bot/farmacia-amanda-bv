@@ -7,7 +7,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { db, initDatabase, clearTestData } from './db.js';
-import { executeFiscalInvoice, executeReportX, executeReportZ, executeOpenDrawer, testFiscalPrinter } from './fiscalService.js';
+import { executeFiscalInvoice, executeReportX, executeReportZ, executeOpenDrawer, testFiscalPrinter, getAvailableComPorts } from './fiscalService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -141,6 +141,15 @@ app.post('/api/fiscal/open-drawer', async (req, res) => {
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/fiscal/ports', async (req, res) => {
+  try {
+    const ports = await getAvailableComPorts();
+    res.json({ ports });
+  } catch (err) {
+    res.status(500).json({ error: err.message, ports: ['COM1', 'COM2', 'COM3', 'COM4'] });
   }
 });
 

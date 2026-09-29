@@ -76,6 +76,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [fiscalTestLoading, setFiscalTestLoading] = useState(false);
   const [fiscalActionLoading, setFiscalActionLoading] = useState(false);
   const [fiscalDiagnostic, setFiscalDiagnostic] = useState<any>(null);
+  const [availablePorts, setAvailablePorts] = useState<string[]>(['COM1', 'COM2', 'COM3', 'COM4']);
+  const [isScanningPorts, setIsScanningPorts] = useState(false);
 
   // 1. Bank Details & Exchange Rate Form State
   const [bankForm, setBankForm] = useState({
@@ -306,6 +308,29 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       setFiscalActionLoading(false);
     }
   };
+
+  // Escaneo dinámico de puertos serie (COM) en Windows
+  const scanPorts = async () => {
+    setIsScanningPorts(true);
+    try {
+      const res = await fetch('/api/fiscal/ports');
+      const data = await res.json();
+      if (Array.isArray(data) && data.length > 0) {
+        setAvailablePorts(data);
+        showNotification(`✓ ${data.length} puerto(s) COM detectado(s) en Windows: ${data.join(', ')}`);
+      }
+    } catch (err: any) {
+      console.warn('Error escaneando puertos COM:', err);
+    } finally {
+      setIsScanningPorts(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'FISCAL') {
+      scanPorts();
+    }
+  }, [activeTab]);
 
   // Change Employee PIN or Password
   const handleUpdatePin = async (e: React.FormEvent) => {
@@ -1508,23 +1533,43 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 </div>
 
                 <div>
-                  <label className="text-xs font-bold text-slate-300 block mb-1">
-                    Puerto Serie (COM de Windows) *
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-bold text-slate-300">
+                      Puerto Serie (COM de Windows) *
+                    </label>
+                    <button
+                      type="button"
+                      onClick={scanPorts}
+                      disabled={isScanningPorts}
+                      className="text-[10px] text-emerald-400 hover:text-emerald-300 font-bold flex items-center gap-1 cursor-pointer transition active:scale-95"
+                      title="Escanear puertos serie conectados por USB en Windows"
+                    >
+                      <RefreshCw className={`w-3 h-3 ${isScanningPorts ? 'animate-spin' : ''}`} />
+                      <span>{isScanningPorts ? 'Detectando...' : 'Detectar Puertos'}</span>
+                    </button>
+                  </div>
                   <select
                     value={fiscalForm.fiscal_printer_port}
                     onChange={e => setFiscalForm({ ...fiscalForm, fiscal_printer_port: e.target.value })}
                     className="w-full p-2.5 bg-slate-950 border border-slate-800 text-white rounded-xl text-xs font-semibold focus:ring-2 focus:ring-emerald-500"
                   >
-                    <option value="COM1">COM1 (Puerto Serial 1)</option>
-                    <option value="COM2">COM2 (Puerto Serial 2)</option>
-                    <option value="COM3">COM3 (USB Emulado HKA)</option>
-                    <option value="COM4">COM4 (USB Emulado HKA)</option>
-                    <option value="COM5">COM5 (USB Emulado HKA)</option>
-                    <option value="COM6">COM6 (USB Emulado HKA)</option>
-                    <option value="COM7">COM7</option>
-                    <option value="COM8">COM8</option>
+                    {availablePorts.map(p => (
+                      <option key={p} value={p}>
+                        {p} (Detectado en Windows)
+                      </option>
+                    ))}
+                    {!availablePorts.includes('COM1') && <option value="COM1">COM1 (Puerto Serial 1)</option>}
+                    {!availablePorts.includes('COM2') && <option value="COM2">COM2 (Puerto Serial 2)</option>}
+                    {!availablePorts.includes('COM3') && <option value="COM3">COM3 (USB Emulado HKA)</option>}
+                    {!availablePorts.includes('COM4') && <option value="COM4">COM4 (USB Emulado HKA)</option>}
+                    {!availablePorts.includes('COM5') && <option value="COM5">COM5 (USB Emulado HKA)</option>}
+                    {!availablePorts.includes('COM6') && <option value="COM6">COM6 (USB Emulado HKA)</option>}
+                    {!availablePorts.includes('COM7') && <option value="COM7">COM7</option>}
+                    {!availablePorts.includes('COM8') && <option value="COM8">COM8</option>}
                   </select>
+                  <span className="text-[10px] text-slate-400 mt-1 block">
+                    Al conectar la impresora por USB, pulsa "Detectar Puertos" para seleccionarlo al instante.
+                  </span>
                 </div>
 
                 <div>

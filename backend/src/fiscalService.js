@@ -248,3 +248,26 @@ export async function testFiscalPrinter() {
     message: `Impresora fiscal ${model} comunicándose correctamente en ${port} a ${baudRate} bps.`
   };
 }
+
+/**
+ * Escaneo dinámico de puertos COM reales en Windows
+ */
+export async function getAvailableComPorts() {
+  try {
+    const { exec } = await import('child_process');
+    return new Promise((resolve) => {
+      exec('powershell -NoProfile -Command "[System.IO.Ports.SerialPort]::GetPortNames()"', (err, stdout) => {
+        if (err || !stdout) {
+          resolve(['COM1', 'COM2', 'COM3', 'COM4']);
+          return;
+        }
+        const ports = stdout.split(/\r?\n/).map(p => p.trim()).filter(Boolean);
+        const unique = Array.from(new Set(ports)).sort();
+        resolve(unique.length > 0 ? unique : ['COM1', 'COM2', 'COM3', 'COM4']);
+      });
+    });
+  } catch (e) {
+    return ['COM1', 'COM2', 'COM3', 'COM4'];
+  }
+}
+
