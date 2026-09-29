@@ -10,6 +10,7 @@ dist
 # Executables & Binaries
 cloudflared.exe
 *.exe
+*.rar
 !Instalador_Caja_Principal.exe
 !Farmacia_Amanda.exe
 

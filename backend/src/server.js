@@ -7,6 +7,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { db, initDatabase, clearTestData } from './db.js';
+import { executeFiscalInvoice, executeReportX, executeReportZ, executeOpenDrawer, testFiscalPrinter } from './fiscalService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -54,7 +55,8 @@ app.put('/api/settings', (req, res) => {
       pharmacy_name, rif, sanitary_license, phone, address,
       welcome_message, exchange_rate, delivery_cost, min_free_delivery,
       bank_name, bank_account_number, bank_phone, bank_id_number, bank_holder,
-      zelle_email, zelle_holder
+      zelle_email, zelle_holder,
+      fiscal_printer_enabled, fiscal_printer_port, fiscal_printer_baudrate, fiscal_printer_model, fiscal_serial
     } = req.body;
 
     db.prepare(`
@@ -62,7 +64,12 @@ app.put('/api/settings', (req, res) => {
         pharmacy_name = ?, rif = ?, sanitary_license = ?, phone = ?, address = ?,
         welcome_message = ?, exchange_rate = ?, delivery_cost = ?, min_free_delivery = ?,
         bank_name = ?, bank_account_number = ?, bank_phone = ?, bank_id_number = ?, bank_holder = ?,
-        zelle_email = ?, zelle_holder = ?
+        zelle_email = ?, zelle_holder = ?,
+        fiscal_printer_enabled = COALESCE(?, fiscal_printer_enabled),
+        fiscal_printer_port = COALESCE(?, fiscal_printer_port),
+        fiscal_printer_baudrate = COALESCE(?, fiscal_printer_baudrate),
+        fiscal_printer_model = COALESCE(?, fiscal_printer_model),
+        fiscal_serial = COALESCE(?, fiscal_serial)
       WHERE id = 1
     `).run(
       pharmacy_name || 'Farmacia FarmaSalud C.A.',
@@ -80,12 +87,58 @@ app.put('/api/settings', (req, res) => {
       bank_id_number || '',
       bank_holder || '',
       zelle_email || '',
-      zelle_holder || ''
+      zelle_holder || '',
+      fiscal_printer_enabled !== undefined ? (fiscal_printer_enabled ? 1 : 0) : null,
+      fiscal_printer_port || null,
+      fiscal_printer_baudrate ? Number(fiscal_printer_baudrate) : null,
+      fiscal_printer_model || null,
+      fiscal_serial || null
     );
 
     const updated = db.prepare('SELECT * FROM settings WHERE id = 1').get();
     io.emit('settings_updated', updated);
     res.json(updated);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// =========================================================================
+// RUTAS DE CONTROL FISCAL SENIAT (THE FACTORY HKA / ACLAS PP9-PLUS)
+// =========================================================================
+app.post('/api/fiscal/test', async (req, res) => {
+  try {
+    const result = await testFiscalPrinter();
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/fiscal/report-x', async (req, res) => {
+  try {
+    const result = await executeReportX();
+    io.emit('fiscal_event', { type: 'REPORT_X', result });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/fiscal/report-z', async (req, res) => {
+  try {
+    const result = await executeReportZ();
+    io.emit('fiscal_event', { type: 'REPORT_Z', result });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/fiscal/open-drawer', async (req, res) => {
+  try {
+    const result = await executeOpenDrawer();
+    res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -737,7 +790,7 @@ app.post('/api/batches', (req, res) => {
 // ==========================================
 // 2. VENTAS Y FACTURACIÓN (POS)
 // ==========================================
-app.post('/api/sales', (req, res) => {
+app.post('/api/sales', async (req, res) => {
   const transaction = db.transaction(() => {
     const {
       customer_id, employee_id, payment_method,
@@ -872,15 +925,37 @@ app.post('/api/sales', (req, res) => {
   try {
     const saleResult = transaction();
 
+    // Emisión Fiscal automática si está habilitada
+    let fiscalData = null;
+    try {
+      const customer = req.body.customer_id ? db.prepare('SELECT * FROM customers WHERE id = ?').get(req.body.customer_id) : {};
+      const fullSale = db.prepare('SELECT * FROM sales WHERE id = ?').get(saleResult.saleId);
+      const fiscalRes = await executeFiscalInvoice(fullSale, req.body.items, customer);
+      if (fiscalRes && fiscalRes.fiscal_mode && fiscalRes.fiscal_invoice_number) {
+        db.prepare('UPDATE sales SET fiscal_invoice_number = ?, fiscal_serial = ? WHERE id = ?')
+          .run(fiscalRes.fiscal_invoice_number, fiscalRes.fiscal_serial, saleResult.saleId);
+        saleResult.fiscal_invoice_number = fiscalRes.fiscal_invoice_number;
+        saleResult.fiscal_serial = fiscalRes.fiscal_serial;
+        fiscalData = fiscalRes;
+      }
+    } catch (fiscalErr) {
+      console.error('[FISCAL ERROR]', fiscalErr);
+    }
+
     for (const item of req.body.items) {
       broadcastStockUpdate(item.product_id);
     }
 
-    io.emit('sale_completed', { invoiceNumber: saleResult.invoiceNumber, total: saleResult.total });
+    io.emit('sale_completed', { 
+      invoiceNumber: saleResult.invoiceNumber, 
+      total: saleResult.total,
+      fiscalInvoiceNumber: saleResult.fiscal_invoice_number
+    });
 
     res.status(201).json({
       success: true,
-      ...saleResult
+      ...saleResult,
+      fiscal: fiscalData
     });
   } catch (err) {
     res.status(400).json({ error: err.message });

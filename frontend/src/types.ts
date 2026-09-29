@@ -150,6 +150,11 @@ export interface Settings {
   bcv_last_updated?: string;
   bcv_source?: string;
   bcv_auto_sync?: number;
+  fiscal_printer_enabled?: number;
+  fiscal_printer_port?: string;
+  fiscal_printer_baudrate?: number;
+  fiscal_printer_model?: string;
+  fiscal_serial?: string;
 }
 
 export interface OnlineOrder {
@@ -230,4 +235,6 @@ export interface Sale {
   created_at: string;
   items?: SaleItem[];
   payments?: SalePayment[];
+  fiscal_invoice_number?: string;
+  fiscal_serial?: string;
 }

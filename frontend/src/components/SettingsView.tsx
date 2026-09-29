@@ -40,6 +40,7 @@ import {
   Edit2,
   Trash2,
   Search,
+  Printer,
   X
 } from 'lucide-react';
 import { Settings, Employee, Category } from '../types';
@@ -59,10 +60,22 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   categories = [],
   onRefresh 
 }) => {
-  const [activeTab, setActiveTab] = useState<'BANK' | 'PROFILE' | 'PASSWORDS' | 'DELIVERY' | 'CATEGORIES'>('BANK');
+  const [activeTab, setActiveTab] = useState<'BANK' | 'PROFILE' | 'PASSWORDS' | 'DELIVERY' | 'CATEGORIES' | 'FISCAL'>('BANK');
   const [isSaving, setIsSaving] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+
+  // 0. Fiscal Printer State (The Factory HKA / ACLAS PP9-PLUS)
+  const [fiscalForm, setFiscalForm] = useState({
+    fiscal_printer_enabled: settings.fiscal_printer_enabled === 1,
+    fiscal_printer_port: settings.fiscal_printer_port || 'COM3',
+    fiscal_printer_baudrate: settings.fiscal_printer_baudrate?.toString() || '9600',
+    fiscal_printer_model: settings.fiscal_printer_model || 'ACLAS PP9-PLUS (The Factory HKA)',
+    fiscal_serial: settings.fiscal_serial || 'Z4A0001234'
+  });
+  const [fiscalTestLoading, setFiscalTestLoading] = useState(false);
+  const [fiscalActionLoading, setFiscalActionLoading] = useState(false);
+  const [fiscalDiagnostic, setFiscalDiagnostic] = useState<any>(null);
 
   // 1. Bank Details & Exchange Rate Form State
   const [bankForm, setBankForm] = useState({
@@ -222,6 +235,75 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       showNotification(err.message || 'Error al actualizar', true);
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  // Guardar configuración de Impresora Fiscal
+  const handleSaveFiscal = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSaving(true);
+    try {
+      const res = await fetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fiscal_printer_enabled: fiscalForm.fiscal_printer_enabled ? 1 : 0,
+          fiscal_printer_port: fiscalForm.fiscal_printer_port,
+          fiscal_printer_baudrate: Number(fiscalForm.fiscal_printer_baudrate) || 9600,
+          fiscal_printer_model: fiscalForm.fiscal_printer_model,
+          fiscal_serial: fiscalForm.fiscal_serial
+        })
+      });
+      if (!res.ok) throw new Error('Error guardando configuración fiscal');
+      onRefresh();
+      showNotification('¡Parámetros de la Impresora Fiscal guardados con éxito!');
+    } catch (err: any) {
+      showNotification(err.message || 'Error al guardar', true);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Probar comunicación con impresora fiscal
+  const handleTestFiscal = async () => {
+    setFiscalTestLoading(true);
+    setFiscalDiagnostic(null);
+    try {
+      const res = await fetch('/api/fiscal/test', { method: 'POST' });
+      const data = await res.json();
+      setFiscalDiagnostic(data);
+      if (data.success) {
+        showNotification('✓ Conexión con ACLAS PP9-PLUS verificada exitosamente.');
+      } else {
+        showNotification(data.error || 'Error en comunicación fiscal', true);
+      }
+    } catch (err: any) {
+      showNotification(err.message || 'Error probando impresora', true);
+    } finally {
+      setFiscalTestLoading(false);
+    }
+  };
+
+  // Ejecutar acciones de control fiscal (Reporte X, Reporte Z, Abrir Gaveta)
+  const handleFiscalAction = async (action: 'report-x' | 'report-z' | 'open-drawer') => {
+    if (action === 'report-z') {
+      if (!window.confirm('¿Está seguro de emitir el REPORTE Z de Cierre Fiscal Diario? Esta acción grabará las ventas en la memoria fiscal del SENIAT y cerrará la jornada del día.')) {
+        return;
+      }
+    }
+    setFiscalActionLoading(true);
+    try {
+      const res = await fetch(`/api/fiscal/${action}`, { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        showNotification(data.message || 'Operación fiscal ejecutada correctamente.');
+      } else {
+        showNotification(data.error || 'Error al ejecutar comando fiscal', true);
+      }
+    } catch (err: any) {
+      showNotification(err.message || 'Error en operación fiscal', true);
+    } finally {
+      setFiscalActionLoading(false);
     }
   };
 
@@ -508,6 +590,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             }`}>
               {categories.length}
             </span>
+          )}
+        </button>
+
+        <button
+          onClick={() => setActiveTab('FISCAL')}
+          className={`px-4 py-2.5 rounded-xl font-bold text-xs flex items-center gap-2 transition cursor-pointer ${
+            activeTab === 'FISCAL'
+              ? 'bg-emerald-600 text-white shadow-md'
+              : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border border-slate-800'
+          }`}
+        >
+          <Printer className="w-4 h-4" />
+          <span>Impresora Fiscal SENIAT (ACLAS / HKA)</span>
+          {fiscalForm.fiscal_printer_enabled && (
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
           )}
         </button>
       </div>
@@ -1340,6 +1437,241 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               </table>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* TAB 6: IMPRESORA FISCAL SENIAT (THE FACTORY HKA / ACLAS PP9-PLUS) */}
+      {activeTab === 'FISCAL' && (
+        <div className="space-y-6 animate-in fade-in duration-200">
+          
+          {/* Tarjeta de Configuración y Parámetros */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 sm:p-6 shadow-xl">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-slate-800 mb-6 gap-3">
+              <div className="flex items-center gap-3">
+                <div className="p-3 bg-emerald-950/80 border border-emerald-800/80 text-emerald-400 rounded-xl">
+                  <Printer className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-base sm:text-lg text-white">
+                    Impresora Fiscal SENIAT (The Factory HKA / ACLAS PP9-PLUS)
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Control de facturación legal, tramas fiscales, apertura de gaveta y reportes X / Z (Providencia SNAT/2018/0141)
+                  </p>
+                </div>
+              </div>
+
+              {/* Status Badge */}
+              <span className={`px-3 py-1 rounded-full text-xs font-black border self-start sm:self-auto ${
+                fiscalForm.fiscal_printer_enabled
+                  ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                  : 'bg-slate-800 text-slate-400 border-slate-700'
+              }`}>
+                {fiscalForm.fiscal_printer_enabled ? '● MODO FISCAL ACTIVO' : '○ MODO FISCAL DESACTIVADO'}
+              </span>
+            </div>
+
+            <form onSubmit={handleSaveFiscal} className="space-y-5">
+              {/* Toggle Habilitar Impresora Fiscal */}
+              <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between gap-4">
+                <div>
+                  <label className="font-extrabold text-sm text-white block">
+                    Activar Impresión Fiscal Automática en Mostrador
+                  </label>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Al cobrar una venta en el POS, se emitirá la Factura Fiscal oficial en la ACLAS PP9-PLUS y se abrirá la gaveta de dinero.
+                  </p>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                  <input
+                    type="checkbox"
+                    checked={fiscalForm.fiscal_printer_enabled}
+                    onChange={e => setFiscalForm({ ...fiscalForm, fiscal_printer_enabled: e.target.checked })}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+                </label>
+              </div>
+
+              {/* Campos de Configuración */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div>
+                  <label className="text-xs font-bold text-slate-300 block mb-1">
+                    Modelo de Equipo Homologado
+                  </label>
+                  <input
+                    type="text"
+                    disabled
+                    value={fiscalForm.fiscal_printer_model}
+                    className="w-full p-2.5 bg-slate-950/60 border border-slate-800 text-slate-400 rounded-xl text-xs font-semibold cursor-not-allowed"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-300 block mb-1">
+                    Puerto Serie (COM de Windows) *
+                  </label>
+                  <select
+                    value={fiscalForm.fiscal_printer_port}
+                    onChange={e => setFiscalForm({ ...fiscalForm, fiscal_printer_port: e.target.value })}
+                    className="w-full p-2.5 bg-slate-950 border border-slate-800 text-white rounded-xl text-xs font-semibold focus:ring-2 focus:ring-emerald-500"
+                  >
+                    <option value="COM1">COM1 (Puerto Serial 1)</option>
+                    <option value="COM2">COM2 (Puerto Serial 2)</option>
+                    <option value="COM3">COM3 (USB Emulado HKA)</option>
+                    <option value="COM4">COM4 (USB Emulado HKA)</option>
+                    <option value="COM5">COM5 (USB Emulado HKA)</option>
+                    <option value="COM6">COM6 (USB Emulado HKA)</option>
+                    <option value="COM7">COM7</option>
+                    <option value="COM8">COM8</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-300 block mb-1">
+                    Velocidad (Baud Rate) *
+                  </label>
+                  <select
+                    value={fiscalForm.fiscal_printer_baudrate}
+                    onChange={e => setFiscalForm({ ...fiscalForm, fiscal_printer_baudrate: e.target.value })}
+                    className="w-full p-2.5 bg-slate-950 border border-slate-800 text-white rounded-xl text-xs font-semibold focus:ring-2 focus:ring-emerald-500"
+                  >
+                    <option value="9600">9600 bps (Estándar The Factory HKA)</option>
+                    <option value="19200">19200 bps (Alta velocidad)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-300 block mb-1">
+                    Serial Fiscal de la Impresora
+                  </label>
+                  <input
+                    type="text"
+                    value={fiscalForm.fiscal_serial}
+                    onChange={e => setFiscalForm({ ...fiscalForm, fiscal_serial: e.target.value.toUpperCase() })}
+                    placeholder="Ej: Z4A0001234"
+                    className="w-full p-2.5 bg-slate-950 border border-slate-800 text-white rounded-xl text-xs font-semibold focus:ring-2 focus:ring-emerald-500 font-mono"
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end pt-3 border-t border-slate-800">
+                <button
+                  type="submit"
+                  disabled={isSaving}
+                  className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs shadow-md transition flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  <Save className="w-4 h-4" />
+                  <span>{isSaving ? 'Guardando Parámetros...' : 'Guardar Configuración Fiscal'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+
+          {/* Tarjeta de Pruebas y Operaciones Fiscales SENIAT */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            
+            {/* Pruebas de Hardware */}
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
+              <h4 className="font-extrabold text-sm text-white flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-emerald-400" />
+                <span>Pruebas de Conexión & Gaveta</span>
+              </h4>
+              <p className="text-xs text-slate-400">
+                Verifica que el cable USB y el puerto serie respondan antes de iniciar la facturación.
+              </p>
+
+              <div className="flex flex-wrap gap-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={handleTestFiscal}
+                  disabled={fiscalTestLoading}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-emerald-500/30 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${fiscalTestLoading ? 'animate-spin' : ''}`} />
+                  <span>{fiscalTestLoading ? 'Interrogando...' : 'Probar Comunicación'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleFiscalAction('open-drawer')}
+                  disabled={fiscalActionLoading}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white border border-slate-700 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  <Landmark className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Abrir Gaveta de Dinero</span>
+                </button>
+              </div>
+
+              {fiscalDiagnostic && (
+                <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 font-mono text-[11px] text-emerald-400 space-y-1">
+                  <div className="text-slate-300 font-bold">Estado del Dispositivo:</div>
+                  <div>• Modelo: {fiscalDiagnostic.model}</div>
+                  <div>• Puerto: {fiscalDiagnostic.port} ({fiscalDiagnostic.baudRate} bps)</div>
+                  <div>• Papel: <span className="text-emerald-300 font-bold">{fiscalDiagnostic.paper_status}</span></div>
+                  <div>• Memoria Fiscal: {fiscalDiagnostic.memory_remaining_z} Reportes Z restantes</div>
+                  <div>• Firmware: {fiscalDiagnostic.firmware_version}</div>
+                </div>
+              )}
+            </div>
+
+            {/* Operaciones Fiscales SENIAT */}
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
+              <h4 className="font-extrabold text-sm text-white flex items-center gap-2">
+                <FileText className="w-4 h-4 text-blue-400" />
+                <span>Reportes Fiscales Oficiales (SENIAT)</span>
+              </h4>
+              <p className="text-xs text-slate-400">
+                Lectura parcial durante el día y cierre obligatorio fiscal al finalizar la jornada.
+              </p>
+
+              <div className="flex flex-col sm:flex-row gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => handleFiscalAction('report-x')}
+                  disabled={fiscalActionLoading}
+                  className="flex-1 px-4 py-3 bg-blue-950/60 hover:bg-blue-900/60 text-blue-300 border border-blue-800/80 rounded-xl text-xs font-bold transition flex flex-col items-center justify-center gap-1 cursor-pointer disabled:opacity-50 shadow-md"
+                >
+                  <span className="text-sm font-black">REPORTE X</span>
+                  <span className="text-[10px] text-blue-400 font-normal">Corte Parcial sin Cierre</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleFiscalAction('report-z')}
+                  disabled={fiscalActionLoading}
+                  className="flex-1 px-4 py-3 bg-[#cf152b]/20 hover:bg-[#cf152b]/30 text-red-300 border border-red-800/80 rounded-xl text-xs font-bold transition flex flex-col items-center justify-center gap-1 cursor-pointer disabled:opacity-50 shadow-md"
+                >
+                  <span className="text-sm font-black">REPORTE Z</span>
+                  <span className="text-[10px] text-red-400 font-normal">Cierre Diario SENIAT</span>
+                </button>
+              </div>
+
+              <div className="p-2.5 bg-amber-950/40 border border-amber-800/40 rounded-xl text-[11px] text-amber-200/90 leading-tight">
+                <strong>Aviso Legal SENIAT:</strong> El Reporte Z corta la jornada fiscal del día y graba los acumulados en la memoria fiscal inviolable del equipo.
+              </div>
+            </div>
+
+          </div>
+
+          {/* Información Legal y Transmisión SENIAT */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl flex items-start gap-4">
+            <div className="p-3 bg-emerald-950/80 border border-emerald-800/80 text-emerald-400 rounded-xl shrink-0 mt-1">
+              <ShieldCheck className="w-6 h-6" />
+            </div>
+            <div className="space-y-1.5 text-xs text-slate-300">
+              <h5 className="font-extrabold text-sm text-white">
+                Transmisión al SENIAT y Respaldo Legal (Providencia SNAT/2018/0141)
+              </h5>
+              <p className="leading-relaxed">
+                La impresora fiscal <strong>ACLAS PP9-PLUS</strong> incorpora su propio dispositivo interno de transmisión homologado por el SENIAT. Al emitir el Reporte Z o a intervalos programados, la impresora se encarga de transmitir directamente los datos fiscales encriptados a los servidores del SENIAT a través de su conexión Wi-Fi/Ethernet.
+              </p>
+              <p className="text-[11px] text-slate-400">
+                El software administrativo actúa como generador de ventas en mostrador y no requiere certificar software ante el SENIAT, ya que la responsabilidad fiscal y la firma electrónica residen exclusivamente en la memoria fiscal de la máquina.
+              </p>
+            </div>
+          </div>
+
         </div>
       )}
 

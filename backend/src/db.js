@@ -305,6 +305,14 @@ export function initDatabase() {
   try { db.exec("ALTER TABLE settings ADD COLUMN bcv_last_updated TEXT"); } catch(e){}
   try { db.exec("ALTER TABLE settings ADD COLUMN bcv_source TEXT"); } catch(e){}
   try { db.exec("ALTER TABLE settings ADD COLUMN bcv_auto_sync INTEGER DEFAULT 1"); } catch(e){}
+  try { db.exec("ALTER TABLE settings ADD COLUMN fiscal_printer_enabled INTEGER DEFAULT 0"); } catch(e){}
+  try { db.exec("ALTER TABLE settings ADD COLUMN fiscal_printer_port TEXT DEFAULT 'COM3'"); } catch(e){}
+  try { db.exec("ALTER TABLE settings ADD COLUMN fiscal_printer_baudrate INTEGER DEFAULT 9600"); } catch(e){}
+  try { db.exec("ALTER TABLE settings ADD COLUMN fiscal_printer_model TEXT DEFAULT 'ACLAS PP9-PLUS (The Factory HKA)'"); } catch(e){}
+  try { db.exec("ALTER TABLE settings ADD COLUMN fiscal_serial TEXT DEFAULT ''"); } catch(e){}
+
+  try { db.exec("ALTER TABLE sales ADD COLUMN fiscal_invoice_number TEXT"); } catch(e){}
+  try { db.exec("ALTER TABLE sales ADD COLUMN fiscal_serial TEXT"); } catch(e){}
 
   // Products IVA and profit margin columns migration
   try { db.exec("ALTER TABLE products ADD COLUMN has_iva INTEGER DEFAULT 0"); } catch(e){}
