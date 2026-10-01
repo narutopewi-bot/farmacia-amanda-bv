@@ -28,6 +28,7 @@ if (process.env.DATABASE_PATH && !fs.existsSync(dbPath)) {
 export const db = new Database(dbPath);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
+db.pragma('cache_size = -2000'); // Limitar caché SQLite a ~2MB en RAM para evitar sobreconsumo en Railway
 
 export function initDatabase() {
   db.exec(`
