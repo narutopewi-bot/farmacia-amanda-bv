@@ -36,4 +36,4 @@ ENV PORT=5000
 EXPOSE 5000
 
 WORKDIR /app/backend
-CMD ["node", "--max-old-space-size=128", "--optimize-for-size", "src/server.js"]
+CMD ["node", "src/server.js"]
