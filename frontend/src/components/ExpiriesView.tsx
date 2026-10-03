@@ -1,11 +1,45 @@
 import React, { useState, useEffect } from 'react';
-import { AlertCircle, AlertTriangle, CheckCircle, Clock, Trash2, ShieldAlert } from 'lucide-react';
+import { AlertCircle, AlertTriangle, CheckCircle, Clock, Trash2, ShieldAlert, Edit2, Calendar } from 'lucide-react';
 import { Batch } from '../types';
 
 export const ExpiriesView: React.FC = () => {
   const [batches, setBatches] = useState<Batch[]>([]);
   const [filter, setFilter] = useState<'ALL' | 'EXPIRED' | 'CRITICAL' | 'WARNING'>('ALL');
   const [loading, setLoading] = useState(true);
+  const [showEditDateModal, setShowEditDateModal] = useState(false);
+  const [selectedBatchForDate, setSelectedBatchForDate] = useState<Batch | null>(null);
+  const [newExpiryDate, setNewExpiryDate] = useState('');
+  const [isSavingDate, setIsSavingDate] = useState(false);
+
+  const handleOpenEditDate = (b: Batch) => {
+    setSelectedBatchForDate(b);
+    setNewExpiryDate(b.expiry_date || '');
+    setShowEditDateModal(true);
+  };
+
+  const handleSaveDate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedBatchForDate) return;
+    setIsSavingDate(true);
+    try {
+      const res = await fetch(`/api/batches/${selectedBatchForDate.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ expiry_date: newExpiryDate })
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Error al actualizar fecha de lote');
+      }
+      setShowEditDateModal(false);
+      setSelectedBatchForDate(null);
+      fetchBatches();
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setIsSavingDate(false);
+    }
+  };
 
   const fetchBatches = async () => {
     setLoading(true);
@@ -191,13 +225,23 @@ export const ExpiriesView: React.FC = () => {
                         ${(b.stock * b.cost_price).toFixed(2)}
                       </td>
                       <td className="py-3 px-4 text-center">
-                        <button
-                          onClick={() => handleRetireBatch(b)}
-                          className="px-2.5 py-1 text-xs text-red-400 hover:text-white hover:bg-red-600 border border-red-800/80 rounded-lg transition cursor-pointer"
-                          title="Dar de baja o registrar merma"
-                        >
-                          Retirar / Merma
-                        </button>
+                        <div className="flex items-center justify-center gap-1.5">
+                          <button
+                            onClick={() => handleOpenEditDate(b)}
+                            className="px-2.5 py-1 text-xs text-amber-400 hover:text-white hover:bg-amber-600 border border-amber-800/80 rounded-lg transition cursor-pointer flex items-center gap-1 font-bold"
+                            title="Modificar fecha de vencimiento"
+                          >
+                            <Calendar className="w-3.5 h-3.5" />
+                            <span>Modificar Fecha</span>
+                          </button>
+                          <button
+                            onClick={() => handleRetireBatch(b)}
+                            className="px-2.5 py-1 text-xs text-red-400 hover:text-white hover:bg-red-600 border border-red-800/80 rounded-lg transition cursor-pointer"
+                            title="Dar de baja o registrar merma"
+                          >
+                            Retirar / Merma
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -207,6 +251,70 @@ export const ExpiriesView: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Modal: Modificar Fecha de Vencimiento de Lote */}
+      {showEditDateModal && selectedBatchForDate && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-xs p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-5 text-white shadow-2xl animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <h3 className="font-extrabold text-sm flex items-center gap-2 text-amber-400">
+                <Calendar className="w-4 h-4" />
+                <span>Modificar Fecha de Vencimiento</span>
+              </h3>
+              <button
+                onClick={() => setShowEditDateModal(false)}
+                className="text-slate-400 hover:text-white cursor-pointer p-1"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveDate} className="mt-4 space-y-4">
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">Medicamento:</label>
+                <div className="font-bold text-white text-sm bg-slate-800 p-2.5 rounded-xl border border-slate-700">
+                  {selectedBatchForDate.product_name}
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">Número de Lote:</label>
+                <div className="font-mono font-bold text-slate-300 text-xs bg-slate-800 p-2.5 rounded-xl border border-slate-700">
+                  {selectedBatchForDate.batch_number}
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs text-amber-300 font-bold block mb-1">Nueva Fecha de Vencimiento:</label>
+                <input
+                  type="date"
+                  required
+                  value={newExpiryDate}
+                  onChange={e => setNewExpiryDate(e.target.value)}
+                  className="w-full p-2.5 bg-slate-950 border border-amber-500/50 rounded-xl text-white font-bold text-sm focus:outline-hidden focus:border-amber-400"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setShowEditDateModal(false)}
+                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingDate}
+                  className="px-5 py-2 rounded-xl bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-white text-xs font-black shadow-md cursor-pointer disabled:opacity-50"
+                >
+                  {isSavingDate ? 'Guardando...' : 'Guardar Fecha'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
     </div>
   );

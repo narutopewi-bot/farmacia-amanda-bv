@@ -157,6 +157,57 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ products, categori
     cost_price: ''
   });
 
+  // Edit Batch State
+  const [showEditBatchModal, setShowEditBatchModal] = useState(false);
+  const [editingBatchProduct, setEditingBatchProduct] = useState<Product | null>(null);
+  const [editingBatchId, setEditingBatchId] = useState<number | null>(null);
+  const [batchEditData, setBatchEditData] = useState({
+    batch_number: '',
+    expiry_date: '',
+    stock: ''
+  });
+  const [isUpdatingBatch, setIsUpdatingBatch] = useState(false);
+
+  const handleOpenEditBatch = (prod: Product, batch: any) => {
+    setEditingBatchProduct(prod);
+    setEditingBatchId(batch.id);
+    setBatchEditData({
+      batch_number: batch.batch_number || '',
+      expiry_date: batch.expiry_date || '',
+      stock: (batch.stock !== undefined && batch.stock !== null) ? batch.stock.toString() : '0'
+    });
+    setShowEditBatchModal(true);
+  };
+
+  const handleUpdateBatch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingBatchId) return;
+    setIsUpdatingBatch(true);
+    try {
+      const res = await fetch(`/api/batches/${editingBatchId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          batch_number: batchEditData.batch_number.trim(),
+          expiry_date: batchEditData.expiry_date.trim(),
+          stock: Number(batchEditData.stock)
+        })
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Error al actualizar lote');
+      }
+      setShowEditBatchModal(false);
+      setEditingBatchId(null);
+      setEditingBatchProduct(null);
+      onRefresh();
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setIsUpdatingBatch(false);
+    }
+  };
+
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -810,10 +861,22 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ products, categori
                       {product.batches && product.batches.length > 0 ? (
                         <div className="space-y-1">
                           {product.batches.map(b => (
-                            <div key={b.id} className="text-[10px] flex items-center gap-1 text-slate-300 font-mono">
-                              <span className="font-semibold text-slate-200">{b.batch_number}:</span>
-                              <span className="text-emerald-400">{b.stock} und</span>
-                              <span className="text-slate-400">(Vence: {b.expiry_date})</span>
+                            <div key={b.id} className="text-[10px] flex items-center justify-between gap-1.5 text-slate-300 font-mono bg-slate-900/60 px-2 py-0.5 rounded border border-slate-800/80">
+                              <div className="flex items-center gap-1 truncate">
+                                <span className="font-semibold text-slate-200">{b.batch_number}:</span>
+                                <span className="text-emerald-400 font-bold">{b.stock} und</span>
+                                <span className="text-slate-400">(Vence: {b.expiry_date})</span>
+                              </div>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleOpenEditBatch(product, b);
+                                }}
+                                className="text-amber-400 hover:text-amber-300 p-0.5 hover:bg-slate-800 rounded transition cursor-pointer shrink-0"
+                                title="Modificar fecha de vencimiento o número de lote"
+                              >
+                                <Edit2 className="w-3 h-3" />
+                              </button>
                             </div>
                           ))}
                         </div>
@@ -1283,14 +1346,45 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ products, categori
                   </div>
                 </div>
               ) : (
-                <div className="bg-[#0f172a] p-3.5 rounded-xl border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
-                  <div>
-                    <span className="font-bold text-slate-200 block">Existencias Actuales:</span>
-                    <span className="text-[11px] text-emerald-400 font-semibold">{editingProduct.total_stock} unidades disponibles en {editingProduct.batches?.length || 0} lote(s)</span>
+                <div className="bg-[#0f172a] p-3.5 rounded-xl border border-slate-800 space-y-2 text-xs">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div>
+                      <span className="font-bold text-slate-200 block">Lotes y Existencias Actuales:</span>
+                      <span className="text-[11px] text-emerald-400 font-semibold">{editingProduct.total_stock} unidades disponibles en {editingProduct.batches?.length || 0} lote(s)</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedProductForBatch(editingProduct);
+                        setShowAddBatchModal(true);
+                      }}
+                      className="px-2.5 py-1 bg-emerald-700 hover:bg-emerald-600 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 w-fit cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>+ Ingresar Lote</span>
+                    </button>
                   </div>
-                  <span className="text-[10px] text-slate-400 italic">
-                    Para modificar o registrar nuevos lotes, usa el botón "+ Lote" de la tabla.
-                  </span>
+                  {editingProduct.batches && editingProduct.batches.length > 0 && (
+                    <div className="space-y-1.5 pt-1">
+                      {editingProduct.batches.map(b => (
+                        <div key={b.id} className="flex items-center justify-between p-2 rounded-lg bg-slate-900 border border-slate-800 text-[11px]">
+                          <div className="flex items-center gap-2 font-mono">
+                            <span className="text-white font-bold">{b.batch_number}</span>
+                            <span className="text-emerald-400 font-bold">{b.stock} und</span>
+                            <span className="text-slate-400">(Vence: {b.expiry_date})</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEditBatch(editingProduct, b)}
+                            className="px-2 py-0.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 rounded text-[10px] font-bold flex items-center gap-1 cursor-pointer"
+                          >
+                            <Edit2 className="w-3 h-3" />
+                            <span>Editar Lote</span>
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1800,6 +1894,97 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ products, categori
                 Cerrar
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Modificar Lote (Fecha, Número, Existencia) */}
+      {showEditBatchModal && editingBatchProduct && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-xs p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-5 text-white shadow-2xl animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <h3 className="font-extrabold text-sm flex items-center gap-2 text-amber-400">
+                <Calendar className="w-4 h-4" />
+                <span>Modificar Lote de Medicamento</span>
+              </h3>
+              <button
+                onClick={() => {
+                  setShowEditBatchModal(false);
+                  setEditingBatchId(null);
+                  setEditingBatchProduct(null);
+                }}
+                className="text-slate-400 hover:text-white cursor-pointer p-1"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleUpdateBatch} className="mt-4 space-y-4">
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">Medicamento:</label>
+                <div className="font-bold text-white text-sm bg-slate-800 p-2.5 rounded-xl border border-slate-700">
+                  {editingBatchProduct.name}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-slate-300 font-bold block mb-1">Número de Lote:</label>
+                  <input
+                    type="text"
+                    required
+                    value={batchEditData.batch_number}
+                    onChange={e => setBatchEditData({ ...batchEditData, batch_number: e.target.value })}
+                    className="w-full p-2 bg-slate-950 border border-slate-700 rounded-xl text-white font-mono text-xs focus:outline-hidden focus:border-amber-400"
+                    placeholder="Ej: LT-439602"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs text-amber-300 font-bold block mb-1">Fecha de Vencimiento:</label>
+                  <input
+                    type="date"
+                    required
+                    value={batchEditData.expiry_date}
+                    onChange={e => setBatchEditData({ ...batchEditData, expiry_date: e.target.value })}
+                    className="w-full p-2 bg-slate-950 border border-amber-500/50 rounded-xl text-white font-bold text-xs focus:outline-hidden focus:border-amber-400"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-300 font-bold block mb-1">Unidades en este Lote:</label>
+                <input
+                  type="number"
+                  min="0"
+                  required
+                  value={batchEditData.stock}
+                  onChange={e => setBatchEditData({ ...batchEditData, stock: e.target.value })}
+                  className="w-full p-2 bg-slate-950 border border-slate-700 rounded-xl text-white font-bold text-xs focus:outline-hidden focus:border-amber-400"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowEditBatchModal(false);
+                    setEditingBatchId(null);
+                    setEditingBatchProduct(null);
+                  }}
+                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isUpdatingBatch}
+                  className="px-5 py-2 rounded-xl bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-white text-xs font-black shadow-md cursor-pointer disabled:opacity-50"
+                >
+                  {isUpdatingBatch ? 'Guardando...' : 'Guardar Cambios'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

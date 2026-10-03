@@ -953,6 +953,7 @@ export const PosView: React.FC<PosViewProps> = ({
                         <img
                           src={product.image_url}
                           alt={product.name}
+                          loading="lazy"
                           className="max-h-full max-w-full object-contain group-hover:scale-105 transition-transform duration-200"
                         />
                       ) : (
@@ -1045,6 +1046,7 @@ export const PosView: React.FC<PosViewProps> = ({
                           <img
                             src={product.image_url}
                             alt={product.name}
+                            loading="lazy"
                             className="max-h-full max-w-full object-contain"
                           />
                         ) : (

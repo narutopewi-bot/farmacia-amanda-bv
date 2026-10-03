@@ -53,6 +53,9 @@ app.get('/api/bootstrap', (req, res) => {
     }
     for (const p of products) {
       p.batches = batchesByProduct[p.id] || [];
+      if (p.image_url && p.image_url.startsWith('data:')) {
+        p.image_url = `/api/products/${p.id}/image`;
+      }
     }
 
     const customers = db.prepare('SELECT * FROM customers ORDER BY name ASC').all();
@@ -73,6 +76,11 @@ app.get('/api/bootstrap', (req, res) => {
         LEFT JOIN products p ON oi.product_id = p.id
         WHERE oi.order_id = ?
       `).all(ord.id);
+      for (const it of ord.items) {
+        if (it.image_url && it.image_url.startsWith('data:')) {
+          it.image_url = `/api/products/${it.product_id}/image`;
+        }
+      }
     }
 
     const settings = db.prepare('SELECT * FROM settings WHERE id = 1').get() || {};
@@ -376,6 +384,9 @@ function getProductWithStock(id) {
       WHERE product_id = ? 
       ORDER BY expiry_date ASC
     `).all(id);
+    if (prod.image_url && prod.image_url.startsWith('data:')) {
+      prod.image_url = `/api/products/${prod.id}/image`;
+    }
   }
   return prod;
 }
@@ -539,6 +550,9 @@ app.get('/api/products', (req, res) => {
 
     for (const p of products) {
       p.batches = batchesByProduct[p.id] || [];
+      if (p.image_url && p.image_url.startsWith('data:')) {
+        p.image_url = `/api/products/${p.id}/image`;
+      }
     }
 
     res.json(products);
@@ -633,6 +647,33 @@ app.get('/api/products/:id', (req, res) => {
     res.json(prod);
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Endpoint ultraliviano para servir la imagen del producto bajo demanda y con caché HTTP
+app.get('/api/products/:id/image', (req, res) => {
+  try {
+    const prod = db.prepare('SELECT image_url FROM products WHERE id = ?').get(req.params.id);
+    if (!prod || !prod.image_url) {
+      return res.status(404).send('Image not found');
+    }
+    const url = prod.image_url.trim();
+    if (url.startsWith('data:')) {
+      const match = url.match(/^data:([^;]+);base64,(.+)$/);
+      if (match) {
+        const mimeType = match[1];
+        const buffer = Buffer.from(match[2], 'base64');
+        res.setHeader('Content-Type', mimeType);
+        res.setHeader('Cache-Control', 'public, max-age=86400, immutable');
+        return res.send(buffer);
+      }
+    }
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      return res.redirect(url);
+    }
+    return res.status(404).send('Invalid image format');
+  } catch (err) {
+    res.status(500).send('Error serving image');
   }
 });
 
@@ -741,6 +782,12 @@ app.put('/api/products/:id', (req, res) => {
       ? Number(profit_margin) 
       : (numCost > 0 ? ((numSelling - numCost) / numCost) * 100 : 0);
 
+    let finalImageUrl = image_url || '';
+    if (image_url && image_url.startsWith('/api/products/')) {
+      const existingProd = db.prepare('SELECT image_url FROM products WHERE id = ?').get(productId);
+      if (existingProd) finalImageUrl = existingProd.image_url;
+    }
+
     db.prepare(`
       UPDATE products SET
         code = ?, name = ?, generic_name = ?, category = ?, presentation = ?,
@@ -751,7 +798,7 @@ app.put('/api/products/:id', (req, res) => {
     `).run(
       cleanCode, cleanName, generic_name ? generic_name.trim() : '', category, presentation ? presentation.trim() : '', laboratory ? laboratory.trim() : '',
       prescription_required ? 1 : 0, numCost, numSelling,
-      Number(min_stock) || 5, image_url || '', description ? description.trim() : '', warehouse_location ? warehouse_location.trim() : '',
+      Number(min_stock) || 5, finalImageUrl, description ? description.trim() : '', warehouse_location ? warehouse_location.trim() : '',
       has_iva ? 1 : 0, Number(iva_percent) || 16.0, calcMargin,
       productId
     );
@@ -855,6 +902,59 @@ app.post('/api/batches', (req, res) => {
 
     broadcastStockUpdate(product_id);
     res.status(201).json({ id: result.lastInsertRowid, success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Endpoint para modificar fecha de vencimiento y número de lote existente
+app.put('/api/batches/:id', (req, res) => {
+  try {
+    const { batch_number, expiry_date, stock } = req.body;
+    const batchId = req.params.id;
+    const existing = db.prepare('SELECT * FROM batches WHERE id = ?').get(batchId);
+    if (!existing) {
+      return res.status(404).json({ error: 'Lote no encontrado' });
+    }
+
+    const newBatchNumber = batch_number !== undefined ? String(batch_number).trim() : existing.batch_number;
+    const newExpiry = expiry_date !== undefined ? String(expiry_date).trim() : existing.expiry_date;
+    const newStock = stock !== undefined ? Number(stock) : existing.stock;
+
+    db.prepare(`
+      UPDATE batches SET
+        batch_number = ?,
+        expiry_date = ?,
+        stock = ?
+      WHERE id = ?
+    `).run(newBatchNumber, newExpiry, newStock, batchId);
+
+    // Si se modificó la cantidad en existencia, registrar movimiento de auditoría
+    if (stock !== undefined && Number(stock) !== existing.stock) {
+      const diff = Number(stock) - existing.stock;
+      db.prepare(`
+        INSERT INTO stock_movements (product_id, batch_id, type, quantity, reason)
+        VALUES (?, ?, 'ADJUSTMENT', ?, 'Modificación manual de lote')
+      `).run(existing.product_id, batchId, diff);
+    }
+
+    broadcastStockUpdate(existing.product_id);
+    res.json({ success: true, message: 'Lote actualizado correctamente' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/batches/:id', (req, res) => {
+  try {
+    const batchId = req.params.id;
+    const existing = db.prepare('SELECT * FROM batches WHERE id = ?').get(batchId);
+    if (!existing) {
+      return res.status(404).json({ error: 'Lote no encontrado' });
+    }
+    db.prepare('DELETE FROM batches WHERE id = ?').run(batchId);
+    broadcastStockUpdate(existing.product_id);
+    res.json({ success: true, message: 'Lote eliminado' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
