@@ -3,7 +3,7 @@ import {
   Package, Plus, Search, Filter, AlertTriangle, 
   Calendar, ShieldAlert, Edit2, Layers, CheckCircle, CheckCircle2, X,
   Upload, Image as ImageIcon, Camera, Trash2, HelpCircle, Sparkles, Check,
-  ScanLine, Globe, RefreshCw
+  ScanLine, Globe, RefreshCw, ChevronLeft, ChevronRight
 } from 'lucide-react';
 import { Product, Category } from '../types';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
@@ -429,6 +429,20 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ products, categori
     });
   }, [products, search, categoryFilter, stockFilter]);
 
+  // Paginación de 20 en 20 artículos
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 20;
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, categoryFilter, stockFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const startIndex = (currentPage - 1) * pageSize;
+  const paginatedProducts = useMemo(() => {
+    return filtered.slice(startIndex, startIndex + pageSize);
+  }, [filtered, startIndex, pageSize]);
+
   const handleOpenNewProduct = () => {
     setEditingProduct(null);
     setFormData({
@@ -767,7 +781,14 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ products, categori
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800">
-              {filtered.map(product => {
+              {paginatedProducts.length === 0 ? (
+                <tr>
+                  <td colSpan={10} className="py-12 text-center text-slate-400 text-xs">
+                    No se encontraron medicamentos con los filtros seleccionados.
+                  </td>
+                </tr>
+              ) : (
+                paginatedProducts.map(product => {
                 const isOutOfStock = product.total_stock <= 0;
                 const isLowStock = product.total_stock > 0 && product.total_stock <= product.min_stock;
 
@@ -909,9 +930,68 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ products, categori
                     </td>
                   </tr>
                 );
-              })}
+              }))}
             </tbody>
           </table>
+        </div>
+
+        {/* Barra de Paginación Inteligente */}
+        <div className="bg-slate-900/90 border-t border-slate-800 px-4 py-3 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+          <div className="text-slate-400 text-[11px] font-medium">
+            Mostrando del <span className="font-bold text-white">{filtered.length === 0 ? 0 : startIndex + 1}</span> al <span className="font-bold text-white">{Math.min(startIndex + pageSize, filtered.length)}</span> de <span className="font-bold text-emerald-400">{filtered.length}</span> medicamentos
+          </div>
+
+          {totalPages > 1 && (
+            <div className="flex items-center gap-1.5 flex-wrap justify-center">
+              <button
+                type="button"
+                onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                disabled={currentPage === 1}
+                className="px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 disabled:opacity-30 disabled:pointer-events-none transition flex items-center gap-1 font-bold text-xs cursor-pointer shadow-xs"
+              >
+                <ChevronLeft className="w-3.5 h-3.5" />
+                <span>Anterior</span>
+              </button>
+
+              <div className="flex items-center gap-1">
+                {Array.from({ length: totalPages }, (_, i) => i + 1)
+                  .filter(p => p === 1 || p === totalPages || Math.abs(p - currentPage) <= 2)
+                  .map((p, idx, arr) => {
+                    const prev = arr[idx - 1];
+                    const showEllipsis = prev && p - prev > 1;
+
+                    return (
+                      <React.Fragment key={p}>
+                        {showEllipsis && (
+                          <span className="text-slate-500 px-1 font-mono text-xs select-none">...</span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => setCurrentPage(p)}
+                          className={`w-7 h-7 rounded-lg text-xs font-bold transition flex items-center justify-center cursor-pointer ${
+                            currentPage === p
+                              ? 'bg-emerald-600 text-white font-black shadow-xs'
+                              : 'bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white border border-slate-700/60'
+                          }`}
+                        >
+                          {p}
+                        </button>
+                      </React.Fragment>
+                    );
+                  })}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                disabled={currentPage === totalPages}
+                className="px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 disabled:opacity-30 disabled:pointer-events-none transition flex items-center gap-1 font-bold text-xs cursor-pointer shadow-xs"
+              >
+                <span>Siguiente</span>
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
