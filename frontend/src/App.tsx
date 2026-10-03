@@ -147,28 +147,40 @@ export function App() {
     }
   };
 
-  // Fetch all core datasets
+  // Fetch all core datasets (Ultra-fast consolidated bootstrap)
   const fetchAllData = async () => {
     try {
-      const [pRes, cRes, sRes, eRes, oRes, setRes, catRes] = await Promise.all([
-        fetch('/api/products'),
-        fetch('/api/customers'),
-        fetch('/api/suppliers'),
-        fetch('/api/employees'),
-        fetch('/api/orders'),
-        fetch('/api/settings'),
-        fetch('/api/categories')
-      ]);
-
-      const [pJson, cJson, sJson, eJson, oJson, setJson, catJson] = await Promise.all([
-        pRes.json(),
-        cRes.json(),
-        sRes.json(),
-        eRes.json(),
-        oRes.json(),
-        setRes.json(),
-        catRes.json()
-      ]);
+      let pJson = [], cJson = [], sJson = [], eJson = [], oJson = [], setJson = null, catJson = [];
+      const res = await fetch('/api/bootstrap');
+      if (res.ok) {
+        const boot = await res.json();
+        pJson = boot.products || [];
+        cJson = boot.customers || [];
+        sJson = boot.suppliers || [];
+        eJson = boot.employees || [];
+        oJson = boot.orders || [];
+        setJson = boot.settings || null;
+        catJson = boot.categories || [];
+      } else {
+        const [pRes, cRes, sRes, eRes, oRes, setRes, catRes] = await Promise.all([
+          fetch('/api/products'),
+          fetch('/api/customers'),
+          fetch('/api/suppliers'),
+          fetch('/api/employees'),
+          fetch('/api/orders'),
+          fetch('/api/settings'),
+          fetch('/api/categories')
+        ]);
+        [pJson, cJson, sJson, eJson, oJson, setJson, catJson] = await Promise.all([
+          pRes.json(),
+          cRes.json(),
+          sRes.json(),
+          eRes.json(),
+          oRes.json(),
+          setRes.json(),
+          catRes.json()
+        ]);
+      }
 
       setProducts(pJson);
       setCustomers(cJson);

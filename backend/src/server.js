@@ -9,6 +9,8 @@ import { fileURLToPath } from 'url';
 import { db, initDatabase, clearTestData } from './db.js';
 import { executeFiscalInvoice, executeReportX, executeReportZ, executeOpenDrawer, testFiscalPrinter, getAvailableComPorts } from './fiscalService.js';
 
+import compression from 'compression';
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const distPath = path.join(__dirname, '../../frontend/dist');
@@ -25,8 +27,70 @@ const io = new Server(server, {
 });
 
 app.use(cors());
+app.use(compression());
 app.use(express.json({ limit: '25mb' }));
 app.use(express.urlencoded({ extended: true, limit: '25mb' }));
+
+// Endpoint consolidado de arranque (Carga ultrarrápida en una sola petición)
+app.get('/api/bootstrap', (req, res) => {
+  try {
+    const products = db.prepare(`
+      SELECT p.*, 
+        COALESCE(SUM(b.stock), 0) as total_stock,
+        MIN(CASE WHEN b.stock > 0 THEN b.expiry_date ELSE NULL END) as nearest_expiry,
+        COUNT(CASE WHEN b.stock > 0 THEN 1 ELSE NULL END) as active_batches_count
+      FROM products p
+      LEFT JOIN batches b ON p.id = b.product_id
+      GROUP BY p.id
+      ORDER BY p.name ASC
+    `).all();
+
+    const allBatches = db.prepare(`SELECT * FROM batches ORDER BY expiry_date ASC`).all();
+    const batchesByProduct = {};
+    for (const b of allBatches) {
+      if (!batchesByProduct[b.product_id]) batchesByProduct[b.product_id] = [];
+      batchesByProduct[b.product_id].push(b);
+    }
+    for (const p of products) {
+      p.batches = batchesByProduct[p.id] || [];
+    }
+
+    const customers = db.prepare('SELECT * FROM customers ORDER BY name ASC').all();
+    const suppliers = db.prepare('SELECT * FROM suppliers ORDER BY name ASC').all();
+    
+    const employees = db.prepare('SELECT * FROM employees ORDER BY name ASC').all();
+    const parsedEmployees = employees.map(emp => {
+      let perms = [];
+      try { perms = emp.permissions ? JSON.parse(emp.permissions) : []; } catch(e){}
+      return { ...emp, permissions: perms };
+    });
+
+    const orders = db.prepare('SELECT * FROM online_orders ORDER BY id DESC LIMIT 50').all();
+    for (const ord of orders) {
+      ord.items = db.prepare(`
+        SELECT oi.*, p.image_url, p.code as product_code
+        FROM online_order_items oi
+        LEFT JOIN products p ON oi.product_id = p.id
+        WHERE oi.order_id = ?
+      `).all(ord.id);
+    }
+
+    const settings = db.prepare('SELECT * FROM settings WHERE id = 1').get() || {};
+    const categories = db.prepare('SELECT * FROM categories ORDER BY name ASC').all();
+
+    res.json({
+      products,
+      customers,
+      suppliers,
+      employees: parsedEmployees,
+      orders,
+      settings,
+      categories
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // Endpoint administrativo para resetear la base de datos a cero
 app.post('/api/admin/reset-data', (req, res) => {
@@ -3269,7 +3333,23 @@ app.get('/api/sync/status', (req, res) => {
 
 // Serve production frontend assets if dist exists
 if (fs.existsSync(distPath)) {
-  app.use(express.static(distPath));
+  // Caché inmutable de 1 año para assets versionados por Vite (JS, CSS, imágenes con hash)
+  app.use('/assets', express.static(path.join(distPath, 'assets'), {
+    maxAge: '1y',
+    immutable: true
+  }));
+
+  // Caché de 1 hora para otros recursos estáticos (emblem, logos)
+  app.use(express.static(distPath, {
+    maxAge: '1h',
+    setHeaders: (res, filePath) => {
+      if (filePath.endsWith('.html')) {
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      }
+    }
+  }));
+
+  // SPA fallback: index.html siempre fresco para actualizaciones inmediatas
   app.get('*', (req, res, next) => {
     if (req.path.startsWith('/api') || req.path.startsWith('/socket.io')) {
       return next();

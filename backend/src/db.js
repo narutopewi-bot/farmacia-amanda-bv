@@ -361,6 +361,20 @@ export function initDatabase() {
   // Employees permissions column migration
   try { db.exec("ALTER TABLE employees ADD COLUMN permissions TEXT DEFAULT '[]'"); } catch(e){}
 
+  // Índices de alta velocidad para acelerar búsquedas, inventario y login
+  try {
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_batches_product_id ON batches(product_id);
+      CREATE INDEX IF NOT EXISTS idx_batches_expiry ON batches(expiry_date);
+      CREATE INDEX IF NOT EXISTS idx_products_code ON products(code);
+      CREATE INDEX IF NOT EXISTS idx_products_name ON products(name);
+      CREATE INDEX IF NOT EXISTS idx_employees_username ON employees(username);
+      CREATE INDEX IF NOT EXISTS idx_sales_created ON sales(created_at);
+      CREATE INDEX IF NOT EXISTS idx_sale_items_sale ON sale_items(sale_id);
+      CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone);
+    `);
+  } catch(e){}
+
   // Ensure default settings exist
   const settingCount = db.prepare('SELECT count(*) as count FROM settings').get().count;
   if (settingCount === 0) {
