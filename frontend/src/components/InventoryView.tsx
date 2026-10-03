@@ -882,22 +882,10 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ products, categori
                       {product.batches && product.batches.length > 0 ? (
                         <div className="space-y-1">
                           {product.batches.map(b => (
-                            <div key={b.id} className="text-[10px] flex items-center justify-between gap-1.5 text-slate-300 font-mono bg-slate-900/60 px-2 py-0.5 rounded border border-slate-800/80">
-                              <div className="flex items-center gap-1 truncate">
-                                <span className="font-semibold text-slate-200">{b.batch_number}:</span>
-                                <span className="text-emerald-400 font-bold">{b.stock} und</span>
-                                <span className="text-slate-400">(Vence: {b.expiry_date})</span>
-                              </div>
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleOpenEditBatch(product, b);
-                                }}
-                                className="text-amber-400 hover:text-amber-300 p-0.5 hover:bg-slate-800 rounded transition cursor-pointer shrink-0"
-                                title="Modificar fecha de vencimiento o número de lote"
-                              >
-                                <Edit2 className="w-3 h-3" />
-                              </button>
+                            <div key={b.id} className="text-[10px] flex items-center gap-1 text-slate-300 font-mono">
+                              <span className="font-semibold text-slate-200">{b.batch_number}:</span>
+                              <span className="text-emerald-400 font-bold">{b.stock} und</span>
+                              <span className="text-slate-400">(Vence: {b.expiry_date})</span>
                             </div>
                           ))}
                         </div>
