@@ -224,6 +224,9 @@ export const PosView: React.FC<PosViewProps> = ({
   const [showFiscalDiagnosticModal, setShowFiscalDiagnosticModal] = useState(false);
   const [fiscalDiagnosticLoading, setFiscalDiagnosticLoading] = useState(false);
   const [fiscalTestResult, setFiscalTestResult] = useState<any>(null);
+  const [selectedFiscalPort, setSelectedFiscalPort] = useState<string>(() => {
+    return settings?.fiscal_printer_port || 'USB';
+  });
 
   const checkFiscalBridge = async () => {
     try {
@@ -239,6 +242,9 @@ export const PosView: React.FC<PosViewProps> = ({
         if (directRes.ok) {
           const directData = await directRes.json();
           setFiscalBridgeStatus({ online: true, loading: false, info: directData });
+          if (directData.assignedPort && (!selectedFiscalPort || selectedFiscalPort === 'USB')) {
+            // Keep USB as default if that's what's set
+          }
           return;
         }
       } catch (directErr) {
@@ -272,14 +278,43 @@ export const PosView: React.FC<PosViewProps> = ({
     setFiscalDiagnosticLoading(true);
     setFiscalTestResult(null);
     try {
-      const res = await fetch('/api/fiscal/test', { method: 'POST' });
-      const data = await res.json();
+      const targetPort = selectedFiscalPort || settings?.fiscal_printer_port || 'USB';
+      let data = null;
+
+      // 1. Probar directamente contra el puente en localhost (PC de caja física)
+      try {
+        const directTest = await fetch('http://127.0.0.1:9095/api/fiscal/test', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: 'ACLAS PP9 - PLUS',
+            port: targetPort
+          }),
+          signal: AbortSignal.timeout(8000)
+        });
+        if (directTest.ok) {
+          data = await directTest.json();
+        }
+      } catch (e) {
+        // Fallback al backend
+      }
+
+      // 2. Si no respondió directo, consultar a través del backend
+      if (!data) {
+        const res = await fetch('/api/fiscal/test', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ port: targetPort })
+        });
+        data = await res.json();
+      }
+
       setFiscalTestResult(data);
       if (data.success) {
         showPosNotification('✓ Comunicación con ACLAS PP9-PLUS verificada con éxito', 'success');
         checkFiscalBridge();
       } else {
-        showPosNotification(`⚠️ Aviso fiscal: ${data.error}`, 'error');
+        showPosNotification(`⚠️ Aviso fiscal: ${data.error || data.message}`, 'error');
       }
     } catch (err: any) {
       showPosNotification(`Error de comunicación: ${err.message}`, 'error');
@@ -290,8 +325,20 @@ export const PosView: React.FC<PosViewProps> = ({
 
   const handleOpenDrawerFiscal = async () => {
     try {
-      const res = await fetch('/api/fiscal/open-drawer', { method: 'POST' });
-      const data = await res.json();
+      let data = null;
+      try {
+        const localRes = await fetch('http://127.0.0.1:9095/api/fiscal/open-drawer', {
+          method: 'POST',
+          signal: AbortSignal.timeout(3000)
+        });
+        if (localRes.ok) data = await localRes.json();
+      } catch {}
+
+      if (!data) {
+        const res = await fetch('/api/fiscal/open-drawer', { method: 'POST' });
+        data = await res.json();
+      }
+
       if (data.success) {
         showPosNotification('✓ Pulso enviado: Gaveta de dinero abierta', 'success');
       } else {
@@ -1175,14 +1222,14 @@ export const PosView: React.FC<PosViewProps> = ({
       </div>
 
       {/* ========================================================================= */}
-      {/* 3. MAIN WORKSPACE: 70% PRODUCT GRID + 30% RIGHT CART DRAWER               */}
+      {/* 3. MAIN WORKSPACE: BALANCED GRID (7 COLS PRODUCTS + 5 COLS WIDE CART)       */}
       {/* ========================================================================= */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
         
         {/* ----------------------------------------------------------------------- */}
-        {/* LEFT: 4-COLUMN TOUCH CARDS GRID (Matches Mockup 2 exactly)              */}
+        {/* LEFT: TOUCH CARDS GRID (7 cols on Desktop for optimal space)            */}
         {/* ----------------------------------------------------------------------- */}
-        <div className="lg:col-span-8 space-y-4">
+        <div className="lg:col-span-7 xl:col-span-7 space-y-4">
           {filteredProducts.length === 0 ? (
             <div className="bg-[#162032] border border-slate-800 rounded-2xl p-16 text-center text-slate-400 space-y-2">
               <Package className="w-12 h-12 mx-auto text-slate-600 mb-2" />
@@ -1190,7 +1237,7 @@ export const PosView: React.FC<PosViewProps> = ({
               <p className="text-xs text-slate-400">Intenta con otro término de búsqueda o selecciona otra categoría.</p>
             </div>
           ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3.5">
+            <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-3 2xl:grid-cols-4 gap-3">
               {filteredProducts.map(product => {
                 const qtyInCart = cartQuantityMap[product.id] || 0;
                 const isOutOfStock = product.total_stock <= 0;
@@ -1205,7 +1252,7 @@ export const PosView: React.FC<PosViewProps> = ({
                         : 'border-slate-800/90'
                     }`}
                   >
-                    {/* White Image Container (Exactly like mockup 2) */}
+                    {/* White Image Container */}
                     <div className="w-full bg-white rounded-xl h-32 flex items-center justify-center p-2.5 relative overflow-hidden shadow-inner">
                       
                       {/* Green Stock Pill on Top Right of White Container */}
@@ -1262,7 +1309,7 @@ export const PosView: React.FC<PosViewProps> = ({
                       </p>
                     </div>
 
-                    {/* Dual Price on One Line (Matches Mockup 2) */}
+                    {/* Dual Price on One Line */}
                     <div className="text-xs font-semibold mt-1 pt-1.5 border-t border-slate-800/80 flex items-baseline gap-1.5 truncate">
                       <span className="text-white font-black text-sm font-mono">
                         ${product.selling_price.toFixed(2)}
@@ -1280,23 +1327,24 @@ export const PosView: React.FC<PosViewProps> = ({
         </div>
 
         {/* ----------------------------------------------------------------------- */}
-        {/* RIGHT: ELEGANT FLOATING CART DRAWER (Matches Mockup 2 exactly)          */}
+        {/* RIGHT: EXPANDED COMFORTABLE CART DRAWER (5 cols on Desktop)             */}
         {/* ----------------------------------------------------------------------- */}
-        <div className="hidden lg:block lg:col-span-4 sticky top-20">
+        <div className="hidden lg:block lg:col-span-5 xl:col-span-5 sticky top-20">
           <div className="bg-[#162032] border border-slate-800/90 rounded-2xl p-4 sm:p-5 flex flex-col justify-between shadow-2xl min-h-[580px] text-white">
             
             <div>
               {/* Header: Cart (X) and Close/Clear */}
-              <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-                <div className="flex items-center gap-2">
-                  <h2 className="text-lg font-black text-white">
-                    Cart <span className="text-emerald-400 font-extrabold font-mono">({cart.reduce((a, b) => a + b.quantity, 0)})</span>
+              <div className="flex items-center justify-between pb-3.5 border-b border-slate-800">
+                <div className="flex items-center gap-2.5">
+                  <ShoppingCart className="w-5 h-5 text-emerald-400" />
+                  <h2 className="text-lg font-black text-white tracking-wide">
+                    Orden de Cobro <span className="text-emerald-400 font-extrabold font-mono text-base">({cart.reduce((a, b) => a + b.quantity, 0)})</span>
                   </h2>
                 </div>
                 {cart.length > 0 && (
                   <button
                     onClick={clearCart}
-                    className="p-1 text-slate-400 hover:text-rose-400 rounded-lg transition cursor-pointer"
+                    className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-slate-800/60 rounded-lg transition cursor-pointer"
                     title="Vaciar carrito"
                   >
                     <X className="w-5 h-5" />
@@ -1304,21 +1352,21 @@ export const PosView: React.FC<PosViewProps> = ({
                 )}
               </div>
 
-              {/* Cart Items List with White Thumbnails (Matches Mockup 2) */}
-              <div className="py-3 space-y-2.5 max-h-[290px] overflow-y-auto pr-1">
+              {/* Cart Items List with Enriched Visual Details */}
+              <div className="py-3 space-y-3 max-h-[380px] overflow-y-auto pr-1">
                 {cart.length === 0 ? (
-                  <div className="py-14 text-center text-slate-500 space-y-1">
+                  <div className="py-16 text-center text-slate-500 space-y-1">
                     <p className="text-sm font-bold text-slate-400">El carrito está vacío</p>
-                    <p className="text-xs text-slate-500">Toca cualquier tarjeta de medicamento para añadirla a la orden.</p>
+                    <p className="text-xs text-slate-500">Toca cualquier medicamento del catálogo para añadirlo a la orden.</p>
                   </div>
                 ) : (
                   cart.map(({ product, quantity }) => (
                     <div
                       key={product.id}
-                      className="bg-[#0f172a] rounded-xl p-2.5 flex items-center gap-3 border border-slate-800/60 hover:border-slate-700 transition"
+                      className="bg-[#0f172a] rounded-xl p-3 flex items-start gap-3 border border-slate-800/80 hover:border-slate-700 transition shadow-sm"
                     >
                       {/* White Box Thumbnail */}
-                      <div className="w-12 h-12 bg-white rounded-lg p-1 shrink-0 flex items-center justify-center overflow-hidden shadow-xs">
+                      <div className="w-14 h-14 bg-white rounded-xl p-1.5 shrink-0 flex items-center justify-center overflow-hidden shadow-xs mt-0.5">
                         {product.image_url ? (
                           <img
                             src={product.image_url}
@@ -1327,55 +1375,59 @@ export const PosView: React.FC<PosViewProps> = ({
                             className="max-h-full max-w-full object-contain"
                           />
                         ) : (
-                          <span className="text-slate-800 font-bold text-[10px]">RX</span>
+                          <span className="text-slate-800 font-extrabold text-xs">RX</span>
                         )}
                       </div>
 
-                      {/* Product Name and Price Row (Dual layout) */}
+                      {/* Product Name and Price Row */}
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between gap-1">
-                          <h4 className="text-white font-extrabold text-xs truncate">
+                        <div className="flex items-start justify-between gap-2">
+                          <h4 className="text-white font-black text-xs sm:text-sm leading-snug line-clamp-2">
                             {product.name}
                           </h4>
-                          <span className="text-white font-black text-xs font-mono shrink-0">
-                            ${(product.selling_price * quantity).toFixed(2)}
-                          </span>
+                          <div className="text-right shrink-0">
+                            <span className="text-white font-black text-xs sm:text-sm font-mono block">
+                              ${(product.selling_price * quantity).toFixed(2)}
+                            </span>
+                            <span className="text-slate-400 text-[10px] font-mono block">
+                              Bs. {(product.selling_price * quantity * rate).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </span>
+                          </div>
                         </div>
-                        <div className="flex items-center justify-between gap-1 mt-0.5">
-                          <span className="text-slate-400 text-[10px] truncate">
-                            {product.generic_name || product.presentation || 'Medicamento'}
-                          </span>
-                          <span className="text-slate-400 text-[10px] font-mono shrink-0">
-                            Bs. {(product.selling_price * quantity * rate).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                          </span>
-                        </div>
+
+                        <p className="text-slate-400 text-[11px] truncate mt-0.5">
+                          {product.generic_name || product.presentation || 'Medicamento'}
+                        </p>
                         
                         {/* Stepper inline */}
-                        <div className="flex items-center justify-between mt-1.5 pt-1 border-t border-slate-800/80">
+                        <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-800/80">
                           <div className="flex items-center gap-2">
                             <button
+                              type="button"
                               onClick={() => updateQuantity(product.id, quantity - 1)}
-                              className="w-5 h-5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 flex items-center justify-center text-xs font-bold cursor-pointer"
+                              className="w-7 h-7 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-100 flex items-center justify-center text-sm font-black transition cursor-pointer"
                             >
                               -
                             </button>
-                            <span className="text-xs font-bold text-emerald-400 font-mono w-4 text-center">
+                            <span className="text-sm font-black text-emerald-400 font-mono w-6 text-center">
                               {quantity}
                             </span>
                             <button
+                              type="button"
                               onClick={() => updateQuantity(product.id, quantity + 1)}
-                              className="w-5 h-5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 flex items-center justify-center text-xs font-bold cursor-pointer"
+                              className="w-7 h-7 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-100 flex items-center justify-center text-sm font-black transition cursor-pointer"
                             >
                               +
                             </button>
                           </div>
 
                           <button
+                            type="button"
                             onClick={() => removeFromCart(product.id)}
-                            className="text-slate-500 hover:text-rose-400 cursor-pointer"
-                            title="Eliminar"
+                            className="p-1 text-slate-500 hover:text-rose-400 cursor-pointer transition rounded"
+                            title="Eliminar de la orden"
                           >
-                            <Trash2 className="w-3 h-3" />
+                            <Trash2 className="w-3.5 h-3.5" />
                           </button>
                         </div>
                       </div>
@@ -1386,7 +1438,7 @@ export const PosView: React.FC<PosViewProps> = ({
               </div>
             </div>
 
-            {/* Bottom Summary (Matches Mockup 2 lines exactly) */}
+            {/* Bottom Summary */}
             <div className="pt-3 border-t border-slate-800 space-y-2">
               
               <div className="flex items-center justify-between text-xs text-slate-300">
@@ -1402,8 +1454,21 @@ export const PosView: React.FC<PosViewProps> = ({
               </div>
 
               <div className="flex items-center justify-between text-xs text-slate-300">
-                <span>Tasa de cambio</span>
+                <span>Tasa Oficial BCV</span>
                 <span className="font-mono text-slate-400">Bs. {rate.toFixed(2)}</span>
+              </div>
+
+              {/* Total Display */}
+              <div className="flex items-baseline justify-between pt-2 border-t border-slate-700/80">
+                <span className="text-xs uppercase font-extrabold text-slate-300">Total a Pagar</span>
+                <div className="text-right">
+                  <span className="text-xl sm:text-2xl font-black text-white font-mono block leading-none">
+                    ${totalUsd.toFixed(2)}
+                  </span>
+                  <span className="text-xs font-bold text-emerald-400 font-mono mt-1 block">
+                    Bs. {(totalUsd * rate).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                </div>
               </div>
 
               {/* Minimal Client Selector Dropdown with Quick Register Button */}
@@ -1483,31 +1548,17 @@ export const PosView: React.FC<PosViewProps> = ({
                 </button>
               </div>
 
-              {/* Dual Action Buttons in Cart: Cobrar Fiscal (ACLAS PP9) vs Ticket Térmico [+] */}
-              <div className="space-y-2 mt-2">
+              {/* Single Clean Checkout Button */}
+              <div className="mt-3">
                 <button
                   type="button"
                   disabled={cart.length === 0}
                   onClick={handleOpenCheckoutModal}
-                  className="w-full py-3 bg-blue-600 hover:bg-blue-500 active:scale-[0.99] text-white font-black text-xs sm:text-sm rounded-xl transition shadow-lg shadow-blue-950/60 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                  title="Cobrar y emitir Factura Fiscal oficial en impresora ACLAS PP9-PLUS"
+                  className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-500 active:scale-[0.99] text-white font-black text-sm sm:text-base rounded-2xl transition shadow-xl shadow-emerald-950/50 flex items-center justify-center gap-2.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                  title="Cobrar orden de venta"
                 >
-                  <FileText className="w-4 h-4 text-blue-200" />
-                  <span>Cobrar (Factura Fiscal ACLAS PP9) &bull; ${totalUsd.toFixed(2)}</span>
-                </button>
-
-                <button
-                  type="button"
-                  disabled={cart.length === 0 || isProcessing}
-                  onClick={handleQuickThermalCheckout}
-                  className="w-full py-2.5 bg-emerald-700/80 hover:bg-emerald-600 border border-emerald-500/50 active:scale-[0.99] text-emerald-100 font-bold text-xs rounded-xl transition shadow-md flex items-center justify-center gap-2 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                  title="Cobro rápido e impresión en Ticket Térmico 80mm [Atajo: Tecla +]"
-                >
-                  <Printer className="w-3.5 h-3.5 text-emerald-300" />
-                  <span>Ticket Térmico 80mm (Nota de Entrega)</span>
-                  <kbd className="px-1.5 py-0.5 bg-emerald-950 text-emerald-300 rounded font-mono text-[10px] font-black border border-emerald-500/40 shadow-xs">
-                    +
-                  </kbd>
+                  <CreditCard className="w-5 h-5 text-emerald-100" />
+                  <span>Cobrar &bull; ${totalUsd.toFixed(2)}</span>
                 </button>
               </div>
 
@@ -1910,12 +1961,12 @@ export const PosView: React.FC<PosViewProps> = ({
 
             </div>
 
-            {/* Actions: Factura Fiscal vs Ticket Térmico [+] vs Cancelar */}
+            {/* Actions: Botón único de cobro automático según configuración */}
             <div className="pt-2 flex flex-col sm:flex-row items-stretch gap-2.5">
               <button
                 type="button"
                 onClick={() => setIsPaymentModalOpen(false)}
-                className="py-3 px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl transition cursor-pointer order-last sm:order-first"
+                className="py-3 px-5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl transition cursor-pointer order-last sm:order-first"
               >
                 Cancelar
               </button>
@@ -1923,33 +1974,19 @@ export const PosView: React.FC<PosViewProps> = ({
               <button
                 type="button"
                 disabled={isProcessing || diffUsd > 0.009}
-                onClick={() => handleExecuteCheckout('thermal')}
-                className="flex-1 py-3 px-3 bg-emerald-700/80 hover:bg-emerald-600 border border-emerald-500/50 active:scale-[0.99] text-white font-bold text-xs rounded-xl transition shadow-md flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                title="Cobrar e imprimir comprobante térmico 80mm [Atajo: Tecla +]"
-              >
-                <Printer className="w-4 h-4 text-emerald-200" />
-                <span>Ticket Térmico (80mm)</span>
-                <kbd className="px-1.5 py-0.5 bg-emerald-950 text-emerald-300 rounded font-mono text-[10px] font-black border border-emerald-500/40">
-                  +
-                </kbd>
-              </button>
-
-              <button
-                type="button"
-                disabled={isProcessing || diffUsd > 0.009}
-                onClick={() => handleExecuteCheckout('fiscal')}
-                className="flex-2 py-3 px-4 bg-blue-600 hover:bg-blue-500 active:scale-[0.99] text-white font-black text-xs sm:text-sm rounded-xl transition shadow-lg shadow-blue-950/50 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                title="Cobrar y emitir Factura Fiscal oficial en impresora ACLAS PP9-PLUS"
+                onClick={() => handleExecuteCheckout(settings?.fiscal_printer_enabled === 1 ? 'fiscal' : 'thermal')}
+                className="flex-1 py-3.5 px-6 bg-emerald-600 hover:bg-emerald-500 active:scale-[0.99] text-white font-black text-sm rounded-xl transition shadow-xl shadow-emerald-950/60 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Completar y registrar el cobro"
               >
                 {isProcessing ? (
                   <>
-                    <RefreshCw className="w-4 h-4 animate-spin text-blue-200" />
-                    <span>Emitiendo Fiscal...</span>
+                    <RefreshCw className="w-4 h-4 animate-spin text-white" />
+                    <span>Procesando Cobro...</span>
                   </>
                 ) : (
                   <>
-                    <FileText className="w-4 h-4 text-blue-200" />
-                    <span>Factura Fiscal (ACLAS PP9)</span>
+                    <CheckCircle2 className="w-5 h-5 text-emerald-200" />
+                    <span>Completar Cobro &bull; ${totalUsd.toFixed(2)}</span>
                   </>
                 )}
               </button>
@@ -2769,27 +2806,71 @@ export const PosView: React.FC<PosViewProps> = ({
             </div>
 
             {/* Diagnostic Details */}
-            <div className="bg-[#0f172a] rounded-2xl p-4 border border-slate-800 space-y-2.5 text-xs font-mono">
-              <div className="flex justify-between border-b border-slate-800 pb-2">
+            <div className="bg-[#0f172a] rounded-2xl p-4 border border-slate-800 space-y-3 text-xs font-mono">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-2">
                 <span className="text-slate-400">Microservicio Local:</span>
                 <span className={fiscalBridgeStatus.online ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>
                   {fiscalBridgeStatus.online ? 'http://127.0.0.1:9095 (ONLINE)' : 'SIN RESPUESTA'}
                 </span>
               </div>
-              <div className="flex justify-between border-b border-slate-800 pb-2">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-2">
                 <span className="text-slate-400">Modelo Homologado:</span>
                 <span className="text-white font-bold">ACLAS PP9 - PLUS (The Factory HKA)</span>
               </div>
-              <div className="flex justify-between border-b border-slate-800 pb-2">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-2">
                 <span className="text-slate-400">Puerto de Comunicación:</span>
-                <span className="text-blue-400 font-bold">
-                  {fiscalBridgeStatus.info?.assignedPort || settings?.fiscal_printer_port || 'USB / COM'} (9600 bps, 8E1)
-                </span>
+                <div className="flex items-center gap-1.5">
+                  <select
+                    value={selectedFiscalPort || settings?.fiscal_printer_port || 'USB'}
+                    onChange={async (e) => {
+                      const newPort = e.target.value;
+                      setSelectedFiscalPort(newPort);
+                      try {
+                        await fetch('http://127.0.0.1:9095/api/fiscal/set-port', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ port: newPort })
+                        });
+                      } catch {}
+                      try {
+                        await fetch('/api/settings', {
+                          method: 'PUT',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ fiscal_printer_port: newPort })
+                        });
+                      } catch {}
+                      showPosNotification(`Puerto fiscal actualizado a ${newPort}`, 'success');
+                      checkFiscalBridge();
+                    }}
+                    className="bg-[#162032] border border-blue-500/50 text-blue-300 font-bold px-2 py-1 rounded-lg text-xs cursor-pointer focus:outline-none focus:border-blue-400"
+                  >
+                    <option value="USB">USB (Detección Automática)</option>
+                    <option value="COM1">COM1</option>
+                    <option value="COM2">COM2</option>
+                    <option value="COM3">COM3</option>
+                    <option value="COM4">COM4</option>
+                    <option value="COM5">COM5</option>
+                    <option value="COM6">COM6</option>
+                    <option value="COM7">COM7</option>
+                    <option value="COM8">COM8</option>
+                    <option value="COM99">COM99 (Virtual The Factory)</option>
+                  </select>
+                </div>
               </div>
-              <div className="flex justify-between">
+              <div className="flex items-center justify-between">
                 <span className="text-slate-400">Protocolo SENIAT:</span>
                 <span className="text-slate-200">The Factory HKA V8.5.0 (STX/ETX/LRC)</span>
               </div>
+            </div>
+
+            {/* Practical connection guidance */}
+            <div className="p-3 bg-blue-950/30 border border-blue-800/40 rounded-xl text-[11px] text-blue-200/90 space-y-1">
+              <p className="font-bold text-blue-300 flex items-center gap-1.5">
+                <span>💡</span>
+                <span>Configuración de Puerto:</span>
+              </p>
+              <p>• Si la impresora está conectada mediante cable USB estándar, déjala en <strong>USB (Detección Automática)</strong>. El sistema enviará el comando ENQ a todos los puertos serie USB hasta encontrar la ACLAS PP9 Plus.</p>
+              <p>• Si conoces el puerto COM asignado por Windows en el Administrador de Dispositivos (ej. COM3 o COM4), selecciónalo arriba y haz clic en <strong>Probar Impresora (ENQ)</strong>.</p>
             </div>
 
             {/* Test result box */}
@@ -2800,11 +2881,11 @@ export const PosView: React.FC<PosViewProps> = ({
                   : 'bg-rose-950/60 border-rose-500/40 text-rose-200'
               }`}>
                 <div className="font-bold mb-1">
-                  {fiscalTestResult.success ? '✓ Respuesta del Equipo Homologado:' : '⚠️ Error de Comunicación:'}
+                  {fiscalTestResult.success ? '✓ Respuesta del Equipo Homologado:' : '⚠️ Diagnóstico de Comunicación:'}
                 </div>
                 <div>{fiscalTestResult.message || fiscalTestResult.error}</div>
                 {fiscalTestResult.model && <div>• Modelo: {fiscalTestResult.model}</div>}
-                {fiscalTestResult.port && <div>• Puerto: {fiscalTestResult.port}</div>}
+                {fiscalTestResult.port && <div>• Puerto probado: {fiscalTestResult.port}</div>}
               </div>
             )}
 

@@ -3,7 +3,8 @@ import {
   Pill, ShoppingCart, Package, AlertTriangle, Users, 
   Truck, ShoppingBag, Warehouse as WarehouseIcon, UserCheck, 
   Landmark, Bell, BarChart3, Store, CheckCircle, ExternalLink,
-  CreditCard, Settings as SettingsIcon, Menu, X, LayoutDashboard
+  CreditCard, Settings as SettingsIcon, Menu, X, LayoutDashboard,
+  PanelLeftClose, PanelLeftOpen
 } from 'lucide-react';
 import { socket } from './socket';
 import { Product, Customer, Supplier, Employee, OnlineOrder, Sale, Settings, Category } from './types';
@@ -63,6 +64,23 @@ export function App() {
   });
   const [showLoginModal, setShowLoginModal] = useState<boolean>(false);
   const [receiptAutoPrintMode, setReceiptAutoPrintMode] = useState<'thermal' | 'fiscal' | null>(null);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('farmacia_sidebar_collapsed') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const toggleSidebarCollapsed = () => {
+    setIsSidebarCollapsed(prev => {
+      const next = !prev;
+      try {
+        localStorage.setItem('farmacia_sidebar_collapsed', String(next));
+      } catch {}
+      return next;
+    });
+  };
 
   // Check URL view parameter (e.g. ?view=store, /tienda, /store, #tienda)
   useEffect(() => {
@@ -369,11 +387,28 @@ export function App() {
         // Administrative ERP View: Left Sidebar flush against the wall
         <div className="flex-1 w-full flex flex-col md:flex-row bg-[#090d16]">
           
-          {/* Admin Sidebar Navigation: Docked to left wall on Desktop (Uniform Dark) */}
-          <aside className="hidden md:flex md:w-64 shrink-0 bg-[#0f172a] border-r border-slate-800 p-3.5 flex-col justify-between md:min-h-[calc(100vh-4rem)] md:sticky md:top-16 md:h-[calc(100vh-4rem)] overflow-y-auto">
+          {/* Admin Sidebar Navigation: Docked to left wall on Desktop (Collapsible) */}
+          <aside className={`hidden md:flex shrink-0 bg-[#0f172a] border-r border-slate-800 p-2.5 flex-col justify-between md:min-h-[calc(100vh-4rem)] md:sticky md:top-16 md:h-[calc(100vh-4rem)] overflow-y-auto transition-all duration-300 ${
+            isSidebarCollapsed ? 'md:w-16' : 'md:w-64'
+          }`}>
             <div className="space-y-1">
-              <div className="px-3 py-2 text-[10px] uppercase font-extrabold text-slate-400 tracking-wider">
-                Módulos del Sistema
+              {/* Header with Collapse / Expand Toggle */}
+              <div className="flex items-center justify-between px-2 py-2 border-b border-slate-800/80 mb-2">
+                {!isSidebarCollapsed && (
+                  <span className="text-[10px] uppercase font-extrabold text-slate-400 tracking-wider truncate">
+                    Módulos del Sistema
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={toggleSidebarCollapsed}
+                  className={`p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer ${
+                    isSidebarCollapsed ? 'mx-auto' : ''
+                  }`}
+                  title={isSidebarCollapsed ? 'Expandir menú lateral' : 'Contraer menú lateral'}
+                >
+                  {isSidebarCollapsed ? <PanelLeftOpen className="w-4 h-4 text-emerald-400" /> : <PanelLeftClose className="w-4 h-4" />}
+                </button>
               </div>
 
               {sidebarLinks.map(link => {
@@ -384,18 +419,19 @@ export function App() {
                   <button
                     key={link.id}
                     onClick={() => setActiveTab(link.id as AdminTab)}
-                    className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl font-bold text-xs transition text-left cursor-pointer ${
+                    title={link.label}
+                    className={`w-full flex items-center ${isSidebarCollapsed ? 'justify-center px-2 py-3' : 'justify-between px-3 py-2.5'} rounded-xl font-bold text-xs transition text-left cursor-pointer group relative ${
                       isActive
                         ? 'bg-[#006837] text-white shadow-md'
-                        : 'text-slate-300 hover:bg-slate-850 hover:bg-slate-800/80 hover:text-white'
+                        : 'text-slate-300 hover:bg-slate-800 hover:text-white'
                     }`}
                   >
-                    <div className="flex items-center gap-2.5 truncate">
+                    <div className={`flex items-center ${isSidebarCollapsed ? 'justify-center' : 'gap-2.5 truncate'}`}>
                       <Icon className="w-4 h-4 shrink-0" />
-                      <span className="truncate">{link.label}</span>
+                      {!isSidebarCollapsed && <span className="truncate">{link.label}</span>}
                     </div>
 
-                    {link.badge && (
+                    {!isSidebarCollapsed && link.badge && (
                       <span
                         className={`text-[10px] font-extrabold px-1.5 py-0.5 rounded-full ${
                           link.badgeColor || (isActive ? 'bg-[#004725] text-emerald-100' : 'bg-slate-800 text-slate-300 border border-slate-700/80')
@@ -404,31 +440,49 @@ export function App() {
                         {link.badge}
                       </span>
                     )}
+
+                    {isSidebarCollapsed && link.badge && (
+                      <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full" />
+                    )}
                   </button>
                 );
               })}
             </div>
 
             {/* Quick Online Store Switch Card at bottom of sidebar */}
-            <div className="mt-5 p-3 rounded-xl bg-[#162032] border border-slate-800 text-white space-y-2">
-              <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-400">
-                <Store className="w-3.5 h-3.5" />
-                <span>Tienda Online Activa</span>
+            {!isSidebarCollapsed ? (
+              <div className="mt-5 p-3 rounded-xl bg-[#162032] border border-slate-800 text-white space-y-2">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-400">
+                  <Store className="w-3.5 h-3.5" />
+                  <span>Tienda Online Activa</span>
+                </div>
+                <p className="text-[10px] text-slate-300">
+                  Comparte el link con tus clientes para que hagan pedidos web en tiempo real.
+                </p>
+                <a
+                  href="/?view=store"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full py-2 bg-[#cf152b] hover:bg-[#b30e20] text-white font-extrabold text-xs rounded-lg transition flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
+                >
+                  <Store className="w-3.5 h-3.5" />
+                  <span>Abrir Tienda Web</span>
+                  <ExternalLink className="w-3 h-3" />
+                </a>
               </div>
-              <p className="text-[10px] text-slate-300">
-                Comparte el link con tus clientes para que hagan pedidos web en tiempo real.
-              </p>
-              <a
-                href="/?view=store"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="w-full py-2 bg-[#cf152b] hover:bg-[#b30e20] text-white font-extrabold text-xs rounded-lg transition flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
-              >
-                <Store className="w-3.5 h-3.5" />
-                <span>Abrir Tienda Web</span>
-                <ExternalLink className="w-3 h-3" />
-              </a>
-            </div>
+            ) : (
+              <div className="mt-auto pt-3 flex justify-center">
+                <a
+                  href="/?view=store"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="p-2.5 rounded-xl bg-[#cf152b] hover:bg-[#b30e20] text-white transition flex items-center justify-center cursor-pointer shadow-sm"
+                  title="Abrir Tienda Web"
+                >
+                  <Store className="w-4 h-4" />
+                </a>
+              </div>
+            )}
           </aside>
 
           {/* Mobile Slide-Over Navigation Drawer */}

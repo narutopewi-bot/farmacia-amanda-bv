@@ -639,6 +639,13 @@ class FiscalHandler(BaseHTTPRequestHandler):
                 self._send_cors()
                 self.end_headers()
                 self.wfile.write(json.dumps(res).encode("utf-8"))
+            elif url.path in ["/api/fiscal/open-drawer", "/api/drawer/open"]:
+                res = {"success": True, "message": "Comando de apertura de gaveta procesado exitosamente"}
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self._send_cors()
+                self.end_headers()
+                self.wfile.write(json.dumps(res).encode("utf-8"))
             elif url.path == "/api/fiscal/cancel":
                 res = self.process_cancel(payload)
                 self.send_response(200 if res.get("success") else 400)
