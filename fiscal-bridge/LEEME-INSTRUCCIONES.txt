@@ -1,0 +1,59 @@
+======================================================================
+  GUARDIAN FISCAL BRIDGE - EDICION DUAL HOMOLOGADA SENIAT
+   (ACLAS PP9 - PLUS THE FACTORY HKA / DEVTECH DTP-80i ECRS)
+        PLAN DE ACCION Y GUIA DE INSTALACION PASO A PASO
+======================================================================
+
+ESTE PAQUETE ES 100% AUTONOMO:
+- NO requiere instalar Python en la computadora (incluye binario independiente .exe).
+- NO requiere internet para operar el hardware local.
+- Soporta comunicación serie directa (8E1 9600 bps) para ACLAS PP9 Plus y Emulador VFP HKA.
+- Soporta comunicación USB Directa WinUSB para DEVTECH DTP-80i.
+- Soporta cálculo de alícuotas (General 16%, Reducida 8%, Adicional 31%, Exento 0%) e IGTF 3% en divisas (Providencia 0141).
+- Trabaja de forma 100% INVISIBLE en segundo plano.
+
+----------------------------------------------------------------------
+                   PLAN DE ACCION EN 4 PASOS EXACTOS
+----------------------------------------------------------------------
+
+PASO 1: CONEXION FISICA Y CONSUMIBLES (HARDWARE)
+  Para ACLAS PP9 - PLUS (The Factory HKA):
+  1. Enchufa el cable de corriente y enciende la impresora.
+  2. Conecta el cable Serial RS-232 o el adaptador USB-Serie (Prolific / CH340 / FTDI) a la PC.
+  3. Coloca el rollo de papel térmico de 80 mm.
+  4. Nota: Si vas a realizar pruebas sin máquina física, instala el emulador oficial "VFPHKA-3.2-windows-installer.exe" ubicado en la carpeta "nueva impresora".
+
+  Para DEVTECH DTP-80i (Corporación ECRS):
+  1. Enchufa el cable de corriente y enciende la impresora.
+  2. Conecta el cable USB directo a la computadora.
+  3. Coloca el rollo de papel térmico de 80 mm.
+
+PASO 2: UBICAR ESTA CARPETA EN EL DISCO DURO
+  Recomendado: Guardar esta carpeta en una ruta fija del disco, por ejemplo:
+  C:\GuardianFiscalBridge   o   Documentos\Guardian\fiscal-bridge
+
+PASO 3: ACTIVAR EL SERVICIO SILENCIOSO (SOLO SE HACE UNA VEZ)
+  1. Dentro de esta carpeta, haz doble clic sobre el archivo:
+     >>> INSTALAR-INICIO-AUTOMATICO.bat <<<
+  2. Verás un mensaje de confirmación en verde: "[EXITO]".
+  3. ¡Listo! A partir de este momento, el puente fiscal:
+     - Arranca inmediatamente en segundo plano (100% invisible).
+     - Se iniciará solo cada vez que enciendas la computadora.
+     - Ya NO tienes que abrir ningún archivo manual nunca más.
+
+PASO 4: CONFIGURAR Y COBRAR EN GUARDIAN (NAVEGADOR)
+  1. Entra a tu sistema Guardián (https://dev.guardian.com.ve o local).
+  2. Abre el modal de Operaciones Fiscales (ícono de templo 🏛️ en Ventas o Caja).
+  3. Selecciona tu modelo homologado:
+     - "ACLAS PP9 - PLUS (The Factory HKA)" -> Selecciona el puerto COM (ej: COM1, COM2, COM3) y pulsa "Guardar".
+     - "DEVTECH DTP-80i (Corp. ECRS)" -> Canal USB Directo WinUSB.
+  4. Haz clic en "⚡ Probar e Imprimir Ticket de Test".
+  5. ¡Listo! Al realizar cualquier cobro con Factura Fiscal Oficial SENIAT, la máquina imprimirá el ticket legal con su número correlativo y corte de papel automático.
+
+----------------------------------------------------------------------
+¿QUE HACER SI LA IMPRESORA ESTUVO MAS DE 24 HORAS APAGADA?
+La ley del SENIAT exige un cierre diario (Reporte Z) cada 24 horas continuas de jornada.
+Si el sistema indica bloqueo por 24 horas:
+1. Abre el modal de Operaciones Fiscales 🏛️.
+2. Pulsa el botón "🚨 Emitir Cierre Z".
+3. La máquina emitirá el cierre fiscal y quedará liberada para la jornada actual.

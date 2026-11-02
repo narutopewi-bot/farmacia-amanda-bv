@@ -225,6 +225,34 @@ app.get('/api/fiscal/ports', async (req, res) => {
   }
 });
 
+app.post('/api/fiscal/print-sale/:id', async (req, res) => {
+  try {
+    const saleId = Number(req.params.id);
+    const sale = db.prepare('SELECT * FROM sales WHERE id = ?').get(saleId);
+    if (!sale) return res.status(404).json({ error: 'Venta no encontrada' });
+    
+    const items = db.prepare(`
+      SELECT si.*, p.name as product_name, p.has_iva, p.iva_percent
+      FROM sale_items si
+      LEFT JOIN products p ON si.product_id = p.id
+      WHERE si.sale_id = ?
+    `).all(saleId);
+    
+    const customer = sale.customer_id ? db.prepare('SELECT * FROM customers WHERE id = ?').get(sale.customer_id) : {};
+    
+    const fiscalRes = await executeFiscalInvoice(sale, items, customer);
+    
+    if (fiscalRes && fiscalRes.fiscal_mode && fiscalRes.fiscal_invoice_number) {
+      db.prepare('UPDATE sales SET fiscal_invoice_number = ?, fiscal_serial = ? WHERE id = ?')
+        .run(fiscalRes.fiscal_invoice_number, fiscalRes.fiscal_serial, saleId);
+    }
+    
+    res.json(fiscalRes);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // =========================================================================
 // SERVICIO DE SINCRONIZACIÓN AUTOMÁTICA DE TASA OFICIAL BCV
 // =========================================================================

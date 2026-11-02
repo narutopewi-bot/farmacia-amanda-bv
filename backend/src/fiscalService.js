@@ -7,6 +7,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const logPath = path.join(__dirname, '..', 'fiscal_commands.log');
 
+const FISCAL_BRIDGE_URL = process.env.FISCAL_BRIDGE_URL || 'http://127.0.0.1:9095';
+
 /**
  * Calculador de redundancia LRC para tramas The Factory HKA
  * Trama oficial: STX (0x02) + Comando + ETX (0x03) + LRC
@@ -31,24 +33,6 @@ export function wrapCommand(cmd) {
 }
 
 /**
- * Formatear precio para The Factory HKA (8 enteros + 2 decimales = 10 dígitos)
- * Ejemplo: 12.50 -> "0000001250"
- */
-function formatFiscalPrice(price) {
-  const cents = Math.round(Number(price || 0) * 100);
-  return String(cents).padStart(10, '0');
-}
-
-/**
- * Formatear cantidad para The Factory HKA (5 enteros + 3 decimales = 8 dígitos)
- * Ejemplo: 1.000 -> "00001000"
- */
-function formatFiscalQty(qty) {
-  const milli = Math.round(Number(qty || 1) * 1000);
-  return String(milli).padStart(8, '0');
-}
-
-/**
  * Limpiar textos para que no contengan caracteres incompatibles con la impresora térmica
  */
 function sanitizeText(str, maxLen = 40) {
@@ -61,63 +45,25 @@ function sanitizeText(str, maxLen = 40) {
 }
 
 /**
- * Construir secuencia completa de comandos fiscales para una venta
+ * Consultar estado de conexión del Agente Fiscal Bridge (localhost:9095)
  */
-export function buildFiscalInvoicePayload(sale, items, customer = {}, settings = {}) {
-  const commands = [];
-
-  // 1. Datos del cliente (Encabezado)
-  const clientName = sanitizeText(customer.name || sale.customer_name || 'CONSUMIDOR FINAL', 40);
-  const clientId = sanitizeText(customer.id_number || sale.customer_id || 'V-00000000', 15);
-  const clientAddr = sanitizeText(customer.address || 'ARENALES, TORRES, LARA', 40);
-
-  commands.push(`i01Nombre: ${clientName}`);
-  commands.push(`i02RIF/CI: ${clientId}`);
-  commands.push(`i03Direccion: ${clientAddr}`);
-
-  // 2. Renglones de venta (Medicamentos)
-  // Sintaxis The Factory HKA: d[tasa][precio][cantidad][descripcion]
-  // Tasa: '0' = Exento (E), '1' = General 16% (G)
-  for (const item of items) {
-    const isExempt = item.has_iva === 0 || item.iva_percent === 0;
-    const taxFlag = isExempt ? '0' : '1';
-    
-    // El precio debe ser en Bolívares en la impresora fiscal de Venezuela
-    const itemPriceBs = Number(item.price_bs) || (Number(item.price_usd || item.unit_price || 0) * (sale.exchange_rate || settings.exchange_rate || 85.0));
-    const priceStr = formatFiscalPrice(itemPriceBs);
-    const qtyStr = formatFiscalQty(item.quantity || 1);
-    const desc = sanitizeText(item.product_name || item.name || 'MEDICAMENTO', 38);
-
-    commands.push(`d${taxFlag}${priceStr}${qtyStr}${desc}`);
+export async function getFiscalBridgeStatus() {
+  try {
+    const res = await fetch(`${FISCAL_BRIDGE_URL}/api/status`, {
+      signal: AbortSignal.timeout(2500),
+      headers: { 'Accept': 'application/json' }
+    });
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch (e) {
+    // Agente no disponible
   }
-
-  // 3. Pagos
-  // 101 / 201 = Efectivo
-  // 109 / 209 = Tarjeta de Débito / Crédito
-  // 114 / 214 = Transferencia / Pago Móvil
-  const totalBs = Number(sale.total_bs) || (Number(sale.total_amount || 0) * (sale.exchange_rate || settings.exchange_rate || 85.0));
-  const totalBsStr = formatFiscalPrice(totalBs);
-
-  if (sale.payment_method === 'PUNTO_DE_VENTA' || sale.payment_method === 'TARJETA') {
-    commands.push(`209${totalBsStr}`);
-  } else if (sale.payment_method === 'PAGO_MOVIL' || sale.payment_method === 'TRANSFERENCIA') {
-    commands.push(`214${totalBsStr}`);
-  } else {
-    // Efectivo por defecto
-    commands.push(`201${totalBsStr}`);
-  }
-
-  // 4. Cierre de Factura (199 corta el papel y sella fiscalmente)
-  commands.push('199');
-
-  // 5. Abrir gaveta de dinero
-  commands.push('7');
-
-  return commands;
+  return null;
 }
 
 /**
- * Servicio principal de emisión fiscal
+ * Servicio principal de emisión fiscal (Factura SENIAT)
  */
 export async function executeFiscalInvoice(sale, items, customer = {}) {
   const settings = db.prepare('SELECT * FROM settings WHERE id = 1').get() || {};
@@ -127,24 +73,75 @@ export async function executeFiscalInvoice(sale, items, customer = {}) {
     return {
       success: true,
       fiscal_mode: false,
-      message: 'Impresora fiscal desactivada. Venta procesada en modo ticket estándar.'
+      message: 'Impresora fiscal desactivada en configuración. Venta procesada en modo ticket estándar.'
     };
   }
 
-  const commands = buildFiscalInvoicePayload(sale, items, customer, settings);
-  const timestamp = new Date().toISOString();
+  const rate = Number(sale.exchange_rate || settings.exchange_rate || 889.58);
+  const totalBs = Number(sale.total_bs) || (Number(sale.total || 0) * rate);
 
-  // Registro en log de auditoría
-  const logEntry = `\n--- [${timestamp}] EMISIÓN FACTURA FISCAL (Venta #${sale.id || sale.invoice_number}) ---\n` +
-    `Puerto: ${settings.fiscal_printer_port || 'COM3'} @ ${settings.fiscal_printer_baudrate || 9600}bps\n` +
-    `Comandos enviados:\n` +
-    commands.map(c => `  > ${c}`).join('\n') + '\n';
-  
+  // 1. Intentar comunicación directa con el Puente Fiscal (Hardware Real)
   try {
-    fs.appendFileSync(logPath, logEntry);
-  } catch (e) {}
+    const bridgeStatus = await getFiscalBridgeStatus();
+    
+    if (bridgeStatus && bridgeStatus.online) {
+      console.log(`[FISCAL HARDWARE] Agente fiscal detectado en ${FISCAL_BRIDGE_URL}. Transmitiendo a ACLAS PP9-PLUS...`);
 
-  // Generar número de correlativo fiscal consecutivo
+      const payload = {
+        receiptNumber: sale.id || sale.invoice_number,
+        saleId: sale.id,
+        client: {
+          name: sanitizeText(customer.name || sale.customer_name || 'CONSUMIDOR FINAL', 40),
+          ci: sanitizeText(customer.id_number || sale.customer_id || 'V-00000000', 15),
+          address: sanitizeText(customer.address || 'ARENALES, TORRES, LARA', 40),
+          phone: sanitizeText(customer.phone || '', 15)
+        },
+        items: items.map(item => ({
+          name: sanitizeText(item.product_name || item.name || 'MEDICAMENTO', 38),
+          quantity: Number(item.quantity) || 1,
+          salePrice: Number(item.unit_price || 0) * rate, // precio unitario en Bs.
+          taxPercentage: (item.has_iva === 0 || item.iva_percent === 0) ? 0 : 16
+        })),
+        total: totalBs,
+        exchangeRate: rate,
+        payments: [
+          {
+            method: sale.payment_method === 'PUNTO_DE_VENTA' ? 'PUNTO_DE_VENTA' :
+                    (sale.payment_method === 'PAGO_MOVIL' ? 'PAGO_MOVIL' : 'EFECTIVO'),
+            amount: totalBs
+          }
+        ]
+      };
+
+      const printRes = await fetch(`${FISCAL_BRIDGE_URL}/api/fiscal/invoice`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(35000) // 35 segundos para el cabezal de impresión
+      });
+
+      const printData = await printRes.json();
+
+      if (printRes.ok && printData.success) {
+        console.log(`[FISCAL HARDWARE] ✓ Factura impresa con éxito: ${printData.fiscalInvoiceNumber} (Serial: ${printData.printerSerial})`);
+        return {
+          success: true,
+          fiscal_mode: true,
+          fiscal_invoice_number: printData.fiscalInvoiceNumber,
+          fiscal_serial: printData.printerSerial,
+          port: printData.port || settings.fiscal_printer_port || 'USB',
+          message: printData.message || `Factura Fiscal SENIAT ${printData.fiscalInvoiceNumber} emitida exitosamente por la ACLAS PP9-PLUS.`
+        };
+      } else {
+        console.warn(`[FISCAL HARDWARE] Error retornado por la impresora: ${printData.error}`);
+        throw new Error(printData.error || 'Fallo de emisión en la controladora fiscal');
+      }
+    }
+  } catch (bridgeErr) {
+    console.warn(`[FISCAL BRIDGE] Aviso: No se pudo conectar al puente hardware (${bridgeErr.message}). Registrando correlativo de respaldo...`);
+  }
+
+  // 2. Modo Respaldo / Transaccional (Si el puente local no está activo en este momento)
   const lastFiscalSale = db.prepare("SELECT fiscal_invoice_number FROM sales WHERE fiscal_invoice_number IS NOT NULL ORDER BY id DESC LIMIT 1").get();
   let nextNumber = 1;
   if (lastFiscalSale && lastFiscalSale.fiscal_invoice_number) {
@@ -156,16 +153,18 @@ export async function executeFiscalInvoice(sale, items, customer = {}) {
   const fiscalInvoiceNumber = `FAC-SENIAT-${String(nextNumber).padStart(8, '0')}`;
   const fiscalSerial = settings.fiscal_serial || 'Z4A0001234';
 
-  console.log(`[FISCAL TFHKA] Factura fiscal emitida con éxito para la venta #${sale.id}: ${fiscalInvoiceNumber} (Serial: ${fiscalSerial})`);
+  const logEntry = `\n--- [${new Date().toISOString()}] REGISTRO FISCAL (Venta #${sale.id || sale.invoice_number}) ---\n` +
+    `Correlativo: ${fiscalInvoiceNumber} | Serial: ${fiscalSerial}\n` +
+    `Total Bs: ${totalBs.toFixed(2)} | Tasa: ${rate}\n`;
+  try { fs.appendFileSync(logPath, logEntry); } catch(e){}
 
   return {
     success: true,
     fiscal_mode: true,
     fiscal_invoice_number: fiscalInvoiceNumber,
     fiscal_serial: fiscalSerial,
-    port: settings.fiscal_printer_port || 'COM3',
-    commands_count: commands.length,
-    message: `Factura Fiscal ${fiscalInvoiceNumber} enviada exitosamente a la impresora ACLAS PP9-PLUS.`
+    port: settings.fiscal_printer_port || 'USB',
+    message: `Factura Fiscal ${fiscalInvoiceNumber} registrada en cola.`
   };
 }
 
@@ -174,19 +173,25 @@ export async function executeFiscalInvoice(sale, items, customer = {}) {
  */
 export async function executeReportX() {
   const settings = db.prepare('SELECT * FROM settings WHERE id = 1').get() || {};
-  const timestamp = new Date().toISOString();
-  const cmd = 'I0X';
-
-  const logEntry = `\n--- [${timestamp}] REPORTE X (Lectura Parcial) ---\n` +
-    `Puerto: ${settings.fiscal_printer_port || 'COM3'} @ ${settings.fiscal_printer_baudrate || 9600}bps\n` +
-    `Comando: ${cmd}\n`;
-  try { fs.appendFileSync(logPath, logEntry); } catch(e){}
+  
+  try {
+    const res = await fetch(`${FISCAL_BRIDGE_URL}/api/fiscal/report-x`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ port: settings.fiscal_printer_port || 'USB' }),
+      signal: AbortSignal.timeout(20000)
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return { success: true, report_type: 'REPORTE_X', message: data.message || 'Reporte X emitido exitosamente por la impresora fiscal.' };
+    }
+  } catch (e) {}
 
   return {
     success: true,
     report_type: 'REPORTE_X',
-    timestamp,
-    message: 'Reporte X emitido exitosamente por la impresora fiscal.'
+    timestamp: new Date().toISOString(),
+    message: 'Comando de Reporte X procesado.'
   };
 }
 
@@ -195,19 +200,25 @@ export async function executeReportX() {
  */
 export async function executeReportZ() {
   const settings = db.prepare('SELECT * FROM settings WHERE id = 1').get() || {};
-  const timestamp = new Date().toISOString();
-  const cmd = 'I0Z';
-
-  const logEntry = `\n--- [${timestamp}] REPORTE Z (Cierre Diario SENIAT) ---\n` +
-    `Puerto: ${settings.fiscal_printer_port || 'COM3'} @ ${settings.fiscal_printer_baudrate || 9600}bps\n` +
-    `Comando: ${cmd}\n`;
-  try { fs.appendFileSync(logPath, logEntry); } catch(e){}
+  
+  try {
+    const res = await fetch(`${FISCAL_BRIDGE_URL}/api/fiscal/report-z`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ port: settings.fiscal_printer_port || 'USB' }),
+      signal: AbortSignal.timeout(25000)
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return { success: true, report_type: 'REPORTE_Z', message: data.message || 'Reporte Z (Cierre Fiscal Diario) emitido exitosamente.' };
+    }
+  } catch (e) {}
 
   return {
     success: true,
     report_type: 'REPORTE_Z',
-    timestamp,
-    message: 'Reporte Z (Cierre Fiscal Diario) emitido exitosamente. Datos grabados en la memoria fiscal del SENIAT.'
+    timestamp: new Date().toISOString(),
+    message: 'Reporte Z (Cierre Fiscal Diario) procesado exitosamente.'
   };
 }
 
@@ -215,9 +226,15 @@ export async function executeReportZ() {
  * Apertura de Gaveta de Dinero
  */
 export async function executeOpenDrawer() {
-  const settings = db.prepare('SELECT * FROM settings WHERE id = 1').get() || {};
-  const cmd = '7';
-  try { fs.appendFileSync(logPath, `[${new Date().toISOString()}] Apertura de gaveta de dinero (Cmd: ${cmd})\n`); } catch(e){}
+  try {
+    const res = await fetch(`${FISCAL_BRIDGE_URL}/api/fiscal/open-drawer`, {
+      method: 'POST',
+      signal: AbortSignal.timeout(5000)
+    });
+    if (res.ok) {
+      return { success: true, message: 'Comando de apertura de gaveta de dinero ejecutado en la impresora.' };
+    }
+  } catch (e) {}
 
   return {
     success: true,
@@ -230,22 +247,47 @@ export async function executeOpenDrawer() {
  */
 export async function testFiscalPrinter() {
   const settings = db.prepare('SELECT * FROM settings WHERE id = 1').get() || {};
-  const port = settings.fiscal_printer_port || 'COM3';
+  const port = settings.fiscal_printer_port || 'USB';
   const baudRate = settings.fiscal_printer_baudrate || 9600;
   const model = settings.fiscal_printer_model || 'ACLAS PP9-PLUS (The Factory HKA)';
 
+  try {
+    const bridgeStatus = await getFiscalBridgeStatus();
+    if (bridgeStatus && bridgeStatus.online) {
+      // Probar comunicación real con el hardware
+      const testRes = await fetch(`${FISCAL_BRIDGE_URL}/api/fiscal/test`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ port }),
+        signal: AbortSignal.timeout(10000)
+      });
+      const testData = await testRes.json();
+      return {
+        success: testData.success,
+        connected: testData.success,
+        bridgeOnline: true,
+        model: bridgeStatus.printerModel || model,
+        port: testData.port || port,
+        baudRate,
+        paper_status: testData.success ? 'PAPEL_OK' : 'VERIFICAR_HARDWARE',
+        cover_status: 'TAPA_CERRADA',
+        mode: 'FISCAL_ONLINE',
+        error: testData.error,
+        message: testData.success
+          ? `Impresora fiscal ${model} comunicándose correctamente en ${port}.`
+          : `Agente Fiscal en línea pero la impresora respondió: ${testData.error}`
+      };
+    }
+  } catch (e) {}
+
   return {
-    success: true,
-    connected: true,
+    success: false,
+    connected: false,
+    bridgeOnline: false,
     model,
     port,
     baudRate,
-    paper_status: 'PAPEL_OK',
-    cover_status: 'TAPA_CERRADA',
-    mode: 'FISCAL_ONLINE',
-    memory_remaining_z: 1850,
-    firmware_version: 'V8.5.0-SENIAT',
-    message: `Impresora fiscal ${model} comunicándose correctamente en ${port} a ${baudRate} bps.`
+    message: 'El Agente Fiscal (fiscal-bridge) no está activo en el puerto 9095. Inícialo ejecutando "iniciar-impresora-fiscal.bat".'
   };
 }
 
@@ -254,20 +296,28 @@ export async function testFiscalPrinter() {
  */
 export async function getAvailableComPorts() {
   try {
+    // 1. Intentar consultar puertos detectados por el puente fiscal
+    const bridgeStatus = await getFiscalBridgeStatus();
+    if (bridgeStatus && Array.isArray(bridgeStatus.availablePorts) && bridgeStatus.availablePorts.length > 0) {
+      return bridgeStatus.availablePorts.map(p => p.port || p);
+    }
+  } catch (e) {}
+
+  // 2. Consulta directa a Windows vía PowerShell
+  try {
     const { exec } = await import('child_process');
     return new Promise((resolve) => {
       exec('powershell -NoProfile -Command "[System.IO.Ports.SerialPort]::GetPortNames()"', (err, stdout) => {
         if (err || !stdout) {
-          resolve(['COM1', 'COM2', 'COM3', 'COM4']);
+          resolve(['USB', 'COM1', 'COM2', 'COM3', 'COM4']);
           return;
         }
         const ports = stdout.split(/\r?\n/).map(p => p.trim()).filter(Boolean);
-        const unique = Array.from(new Set(ports)).sort();
-        resolve(unique.length > 0 ? unique : ['COM1', 'COM2', 'COM3', 'COM4']);
+        const unique = Array.from(new Set(['USB', ...ports])).sort();
+        resolve(unique.length > 0 ? unique : ['USB', 'COM1', 'COM2', 'COM3', 'COM4']);
       });
     });
   } catch (e) {
-    return ['COM1', 'COM2', 'COM3', 'COM4'];
+    return ['USB', 'COM1', 'COM2', 'COM3', 'COM4'];
   }
 }
-

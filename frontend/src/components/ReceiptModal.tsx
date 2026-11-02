@@ -1,5 +1,5 @@
-import React from 'react';
-import { Printer, X, CheckCircle2 } from 'lucide-react';
+import React, { useState } from 'react';
+import { Printer, X, CheckCircle2, FileText, Loader2 } from 'lucide-react';
 import { Sale, Settings } from '../types';
 
 interface ReceiptModalProps {
@@ -11,8 +11,34 @@ interface ReceiptModalProps {
 export const ReceiptModal: React.FC<ReceiptModalProps> = ({ sale, settings, onClose }) => {
   if (!sale) return null;
 
+  const [isFiscalPrinting, setIsFiscalPrinting] = useState(false);
+  const [fiscalMsg, setFiscalMsg] = useState<{ text: string; error?: boolean } | null>(null);
+  const [currentFiscalNumber, setCurrentFiscalNumber] = useState(sale.fiscal_invoice_number || '');
+
   const handlePrint = () => {
     window.print();
+  };
+
+  const handleFiscalPrint = async () => {
+    if (!sale.id) return;
+    setIsFiscalPrinting(true);
+    setFiscalMsg(null);
+    try {
+      const res = await fetch(`/api/fiscal/print-sale/${sale.id}`, { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        if (data.fiscal_invoice_number) {
+          setCurrentFiscalNumber(data.fiscal_invoice_number);
+        }
+        setFiscalMsg({ text: data.message || '✓ Factura Fiscal emitida en impresora ACLAS PP9-PLUS' });
+      } else {
+        setFiscalMsg({ text: data.error || 'Error emitiendo factura fiscal', error: true });
+      }
+    } catch (err: any) {
+      setFiscalMsg({ text: err.message || 'Error conectando con la impresora fiscal', error: true });
+    } finally {
+      setIsFiscalPrinting(false);
+    }
   };
 
   const rate = sale.exchange_rate || settings?.exchange_rate || 85.0;
@@ -62,6 +88,16 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ sale, settings, onCl
               <span>COMPROBANTE:</span>
               <span>{sale.invoice_number}</span>
             </div>
+            {currentFiscalNumber && (
+              <div className="bg-emerald-50 border border-emerald-300 rounded p-1.5 text-center my-1">
+                <span className="block font-black text-[11px] text-emerald-900 tracking-wider">
+                  FACTURA FISCAL SENIAT: {currentFiscalNumber}
+                </span>
+                <span className="block text-[9px] text-emerald-700">
+                  Equipo Homologado: {settings?.fiscal_printer_model || 'ACLAS PP9-PLUS (The Factory HKA)'}
+                </span>
+              </div>
+            )}
             <div className="flex justify-between font-bold">
               <span>CONDICIÓN DE PAGO:</span>
               <span className={`px-2 py-0.5 rounded text-[11px] font-black ${
@@ -191,20 +227,49 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ sale, settings, onCl
         </div>
 
         {/* Action Buttons */}
-        <div className="bg-slate-900 px-4 sm:px-6 py-3 sm:py-4 border-t border-slate-800 flex gap-2 sm:gap-3 shrink-0">
-          <button
-            onClick={handlePrint}
-            className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold py-2.5 px-3 sm:px-4 rounded-xl flex items-center justify-center gap-2 shadow-md transition active:scale-98 cursor-pointer text-xs sm:text-sm"
-          >
-            <Printer className="w-4 h-4" />
-            <span>Imprimir Ticket (80mm)</span>
-          </button>
-          <button
-            onClick={onClose}
-            className="px-4 sm:px-5 py-2.5 border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold rounded-xl transition active:scale-98 text-xs sm:text-sm cursor-pointer"
-          >
-            Cerrar
-          </button>
+        <div className="bg-slate-900 px-4 sm:px-6 py-3 sm:py-4 border-t border-slate-800 flex flex-col gap-2.5 shrink-0">
+          {fiscalMsg && (
+            <div className={`text-xs p-2.5 rounded-xl text-center font-bold animate-in fade-in ${
+              fiscalMsg.error 
+                ? 'bg-red-950/70 text-red-200 border border-red-800/80' 
+                : 'bg-emerald-950/70 text-emerald-200 border border-emerald-800/80'
+            }`}>
+              {fiscalMsg.text}
+            </div>
+          )}
+          <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
+            <button
+              onClick={handleFiscalPrint}
+              disabled={isFiscalPrinting}
+              className="flex-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold py-2.5 px-3 sm:px-4 rounded-xl flex items-center justify-center gap-2 shadow-md transition active:scale-98 cursor-pointer text-xs sm:text-sm"
+              title="Emitir Factura Fiscal legal en la máquina homologada ACLAS PP9-PLUS"
+            >
+              {isFiscalPrinting ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin text-blue-200" />
+                  <span>Transmitiendo a Impresora...</span>
+                </>
+              ) : (
+                <>
+                  <FileText className="w-4 h-4 text-blue-200" />
+                  <span>Factura Fiscal (ACLAS PP9)</span>
+                </>
+              )}
+            </button>
+            <button
+              onClick={handlePrint}
+              className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold py-2.5 px-3 sm:px-4 rounded-xl flex items-center justify-center gap-2 shadow-md transition active:scale-98 cursor-pointer text-xs sm:text-sm"
+            >
+              <Printer className="w-4 h-4" />
+              <span>Ticket (80mm)</span>
+            </button>
+            <button
+              onClick={onClose}
+              className="px-4 sm:px-5 py-2.5 border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold rounded-xl transition active:scale-98 text-xs sm:text-sm cursor-pointer"
+            >
+              Cerrar
+            </button>
+          </div>
         </div>
 
       </div>
