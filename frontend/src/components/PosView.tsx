@@ -4,7 +4,8 @@ import {
   Banknote, ArrowRightLeft, UserCheck, AlertCircle, CheckCircle2,
   DollarSign, Smartphone, Edit3, X, Check, Package, RefreshCw,
   ChevronDown, Wallet, Receipt, ChevronRight, Clock,
-  Lock, Unlock, Printer, AlertTriangle, Calculator, UserPlus
+  Lock, Unlock, Printer, AlertTriangle, Calculator, UserPlus,
+  Landmark, FileText, Activity, Sparkles
 } from 'lucide-react';
 import { Product, Customer, Employee, Sale, Settings, SalePayment } from '../types';
 import { Caja } from './CashRegisterView';
@@ -15,7 +16,7 @@ interface PosViewProps {
   employees: Employee[];
   settings: Settings;
   onUpdateExchangeRate: (rate: number) => Promise<void>;
-  onSaleComplete: (sale: Sale) => void;
+  onSaleComplete: (sale: Sale, printMode?: 'fiscal' | 'thermal') => void;
   onRefresh?: () => void;
 }
 
@@ -209,6 +210,96 @@ export const PosView: React.FC<PosViewProps> = ({
   const showPosNotification = (text: string, type: 'success' | 'error' | 'info' = 'success') => {
     setPosToast({ text, type });
     setTimeout(() => setPosToast(null), 4500);
+  };
+
+  // =========================================================================
+  // ESTADO Y SONDEO EN TIEMPO REAL DEL AGENTE FISCAL BRIDGE (ACLAS PP9-PLUS)
+  // =========================================================================
+  const [fiscalBridgeStatus, setFiscalBridgeStatus] = useState<{
+    online: boolean;
+    loading: boolean;
+    info?: any;
+    error?: string;
+  }>({ online: false, loading: true });
+  const [showFiscalDiagnosticModal, setShowFiscalDiagnosticModal] = useState(false);
+  const [fiscalDiagnosticLoading, setFiscalDiagnosticLoading] = useState(false);
+  const [fiscalTestResult, setFiscalTestResult] = useState<any>(null);
+
+  const checkFiscalBridge = async () => {
+    try {
+      // 1. Sondeo directo ultra-rápido en PC local (localhost:9095)
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 1500);
+      try {
+        const directRes = await fetch('http://127.0.0.1:9095/api/status', {
+          signal: controller.signal,
+          headers: { 'Accept': 'application/json' }
+        });
+        clearTimeout(timeoutId);
+        if (directRes.ok) {
+          const directData = await directRes.json();
+          setFiscalBridgeStatus({ online: true, loading: false, info: directData });
+          return;
+        }
+      } catch (directErr) {
+        clearTimeout(timeoutId);
+      }
+
+      // 2. Fallback a través del backend (/api/fiscal/status)
+      const backRes = await fetch('/api/fiscal/status');
+      const backData = await backRes.json();
+      if (backData.online) {
+        setFiscalBridgeStatus({ online: true, loading: false, info: backData });
+      } else {
+        setFiscalBridgeStatus({
+          online: false,
+          loading: false,
+          error: backData.message || 'Puente fiscal no responde en localhost:9095'
+        });
+      }
+    } catch (err: any) {
+      setFiscalBridgeStatus({ online: false, loading: false, error: 'Puente cerrado' });
+    }
+  };
+
+  useEffect(() => {
+    checkFiscalBridge();
+    const interval = setInterval(checkFiscalBridge, 8000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleTestFiscalPing = async () => {
+    setFiscalDiagnosticLoading(true);
+    setFiscalTestResult(null);
+    try {
+      const res = await fetch('/api/fiscal/test', { method: 'POST' });
+      const data = await res.json();
+      setFiscalTestResult(data);
+      if (data.success) {
+        showPosNotification('✓ Comunicación con ACLAS PP9-PLUS verificada con éxito', 'success');
+        checkFiscalBridge();
+      } else {
+        showPosNotification(`⚠️ Aviso fiscal: ${data.error}`, 'error');
+      }
+    } catch (err: any) {
+      showPosNotification(`Error de comunicación: ${err.message}`, 'error');
+    } finally {
+      setFiscalDiagnosticLoading(false);
+    }
+  };
+
+  const handleOpenDrawerFiscal = async () => {
+    try {
+      const res = await fetch('/api/fiscal/open-drawer', { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        showPosNotification('✓ Pulso enviado: Gaveta de dinero abierta', 'success');
+      } else {
+        showPosNotification(data.error || 'No se pudo abrir la gaveta', 'error');
+      }
+    } catch (err: any) {
+      showPosNotification(err.message, 'error');
+    }
   };
 
   const fetchCajasPos = async () => {
@@ -554,7 +645,8 @@ export const PosView: React.FC<PosViewProps> = ({
     setIsPaymentModalOpen(true);
   };
 
-  const handleExecuteCheckout = async () => {
+  // Cobro Principal (Fiscal o Térmico)
+  const handleExecuteCheckout = async (printMode: 'fiscal' | 'thermal' = 'fiscal') => {
     if (cart.length === 0) {
       setErrorMsg('El carrito está vacío');
       return;
@@ -676,18 +768,170 @@ export const PosView: React.FC<PosViewProps> = ({
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Error al procesar la venta');
 
-      const saleRes = await fetch(`/api/sales/${data.saleId}`);
-      const fullSale = await saleRes.json();
+      let fullSale = await (await fetch(`/api/sales/${data.saleId}`)).json();
 
-      onSaleComplete(fullSale);
+      // Si se seleccionó emisión fiscal, enviar directo al puente fiscal local
+      if (printMode === 'fiscal') {
+        try {
+          const fiscalRes = await fetch(`/api/fiscal/print-sale/${data.saleId}`, { method: 'POST' });
+          const fiscalData = await fiscalRes.json();
+          if (fiscalData.success && fiscalData.fiscal_invoice_number) {
+            fullSale.fiscal_invoice_number = fiscalData.fiscal_invoice_number;
+            fullSale.fiscal_serial = fiscalData.fiscal_serial;
+            showPosNotification(`✓ Factura Fiscal #${fiscalData.fiscal_invoice_number} emitida en ACLAS PP9-PLUS`, 'success');
+          } else if (fiscalData.error) {
+            showPosNotification(`⚠️ Venta guardada pero aviso fiscal: ${fiscalData.error}`, 'error');
+          }
+        } catch (fErr: any) {
+          console.warn('Error emitiendo factura fiscal:', fErr);
+          showPosNotification('Venta guardada. No se pudo conectar al puente fiscal (localhost:9095)', 'error');
+        }
+      }
+
+      setIsPaymentModalOpen(false);
       clearCart();
       fetchCajasPos();
+      onSaleComplete(fullSale, printMode);
     } catch (err: any) {
       setErrorMsg(err.message);
     } finally {
       setIsProcessing(false);
     }
   };
+
+  // Cobro Rápido con Ticket Térmico 80mm [Tecla + o NumpadAdd]
+  const handleQuickThermalCheckout = async () => {
+    if (cart.length === 0 || isProcessing) return;
+
+    if (!currentActiveCaja) {
+      showPosNotification('⚠️ Para facturar debe abrir o tener una caja activa en este terminal.', 'error');
+      handleOpenPosAbrir();
+      return;
+    }
+
+    setIsProcessing(true);
+    setErrorMsg('');
+
+    try {
+      const paymentsToSave: SalePayment[] = [];
+      if (numPayCashUsd > 0 || numPayCashBs > 0 || numPayPagoMovilBs > 0 || numPayCardBs > 0 || numPayZelleUsd > 0 || numPayCreditUsd > 0) {
+        if (numPayCashUsd > 0) paymentsToSave.push({ payment_method: 'CASH_USD', currency: 'USD', amount: numPayCashUsd, amount_usd: numPayCashUsd, amount_bs: numPayCashUsd * rate, reference: '' });
+        if (numPayZelleUsd > 0) paymentsToSave.push({ payment_method: 'ZELLE_USD', currency: 'USD', amount: numPayZelleUsd, amount_usd: numPayZelleUsd, amount_bs: numPayZelleUsd * rate, reference: refZelle });
+        if (numPayPagoMovilBs > 0) paymentsToSave.push({ payment_method: 'PAGO_MOVIL', currency: 'BS', amount: numPayPagoMovilBs, amount_usd: eqPagoMovilUsd, amount_bs: numPayPagoMovilBs, reference: refPagoMovil });
+        if (numPayCardBs > 0) paymentsToSave.push({ payment_method: 'CARD_BS', currency: 'BS', amount: numPayCardBs, amount_usd: eqCardUsd, amount_bs: numPayCardBs, reference: refCard });
+        if (numPayCashBs > 0) paymentsToSave.push({ payment_method: 'CASH_BS', currency: 'BS', amount: numPayCashBs, amount_usd: eqCashBsUsd, amount_bs: numPayCashBs, reference: '' });
+        if (numPayCreditUsd > 0) paymentsToSave.push({ payment_method: 'CREDIT', currency: 'USD', amount: numPayCreditUsd, amount_usd: numPayCreditUsd, amount_bs: numPayCreditUsd * rate, reference: `Plazo: ${creditDays} días` });
+      } else {
+        paymentsToSave.push({
+          payment_method: 'CASH_USD',
+          currency: 'USD',
+          amount: Number(totalUsd.toFixed(2)),
+          amount_usd: Number(totalUsd.toFixed(2)),
+          amount_bs: Number(totalBs.toFixed(2)),
+          reference: 'Cobro Rápido Térmico (+)'
+        });
+      }
+
+      const payload = {
+        cash_register_id: currentActiveCaja?.id || null,
+        customer_id: selectedCustomerId,
+        employee_id: selectedEmployeeId,
+        sale_type: 'CONTADO',
+        payment_method: paymentsToSave[0].payment_method,
+        discount: numDiscount,
+        tax: Number(taxUsd.toFixed(2)),
+        exchange_rate: rate,
+        change_currency: changeCurrency,
+        change_amount: changeCurrency === 'USD' ? changeUsd : changeBs,
+        payments: paymentsToSave,
+        items: cart.map(i => ({
+          product_id: i.product.id,
+          unit_price: i.product.selling_price,
+          quantity: i.quantity
+        }))
+      };
+
+      const res = await fetch('/api/sales', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Error al procesar la venta');
+
+      const saleRes = await fetch(`/api/sales/${data.saleId}`);
+      const fullSale = await saleRes.json();
+
+      setIsPaymentModalOpen(false);
+      clearCart();
+      fetchCajasPos();
+      showPosNotification('✓ Venta procesada con Ticket Térmico 80mm [Tecla +]', 'success');
+      onSaleComplete(fullSale, 'thermal');
+    } catch (err: any) {
+      setErrorMsg(err.message);
+      showPosNotification(err.message, 'error');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  // Atajo global de teclado: Tecla '+' para Cobro Rápido en Térmica (tal como en Guardián)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== '+' && e.code !== 'NumpadAdd') return;
+
+      const target = e.target as HTMLElement;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable ||
+          target.closest('input') ||
+          target.closest('textarea') ||
+          target.closest('select'))
+      ) {
+        return;
+      }
+
+      if (cart.length === 0 || !currentActiveCaja || isProcessing) {
+        return;
+      }
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      handleQuickThermalCheckout();
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [
+    cart,
+    currentActiveCaja,
+    isProcessing,
+    totalUsd,
+    totalBs,
+    rate,
+    selectedCustomerId,
+    selectedEmployeeId,
+    numDiscount,
+    taxUsd,
+    changeCurrency,
+    changeUsd,
+    changeBs,
+    numPayCashUsd,
+    numPayCashBs,
+    numPayPagoMovilBs,
+    numPayCardBs,
+    numPayZelleUsd,
+    numPayCreditUsd,
+    refZelle,
+    refPagoMovil,
+    refCard,
+    creditDays
+  ]);
 
   const handleSaveRate = async () => {
     const newR = Number(tempRate);
@@ -835,6 +1079,39 @@ export const PosView: React.FC<PosViewProps> = ({
               )}
             </div>
           )}
+
+          {/* INDICADOR EN VIVO DEL PUENTE FISCAL (ACLAS PP9-PLUS) */}
+          <button
+            type="button"
+            onClick={() => setShowFiscalDiagnosticModal(true)}
+            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-2xl border transition-all cursor-pointer shadow-sm text-left ${
+              fiscalBridgeStatus.online
+                ? 'bg-[#121c2e] border-blue-500/50 hover:border-blue-400 text-blue-200'
+                : 'bg-[#22171d] border-amber-500/40 hover:border-amber-400 text-amber-300'
+            }`}
+            title="Clic para ver estado y diagnóstico de la impresora fiscal ACLAS PP9-PLUS"
+          >
+            <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${
+              fiscalBridgeStatus.online ? 'bg-blue-400 animate-pulse' : 'bg-amber-500'
+            }`} />
+            <div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-black text-white">ACLAS PP9-PLUS</span>
+                <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded border uppercase tracking-wider ${
+                  fiscalBridgeStatus.online
+                    ? 'bg-blue-500/20 text-blue-300 border-blue-400/40'
+                    : 'bg-amber-500/20 text-amber-300 border-amber-400/40'
+                }`}>
+                  {fiscalBridgeStatus.online ? '● EN LÍNEA' : '○ DESCONECTADO'}
+                </span>
+              </div>
+              <div className="text-[10px] text-slate-400 font-medium">
+                {fiscalBridgeStatus.online 
+                  ? `Puerto: ${fiscalBridgeStatus.info?.assignedPort || 'USB'} • localhost:9095`
+                  : 'Puente cerrado (clic para ayuda)'}
+              </div>
+            </div>
+          </button>
         </div>
 
         {/* Search Bar matching mockup input */}
@@ -1206,15 +1483,33 @@ export const PosView: React.FC<PosViewProps> = ({
                 </button>
               </div>
 
-              {/* Giant Solid Green Action Button (Matches Mockup 2 exactly) */}
-              <button
-                type="button"
-                disabled={cart.length === 0}
-                onClick={handleOpenCheckoutModal}
-                className="w-full mt-2 py-3.5 bg-[#10b981] hover:bg-[#059669] active:scale-[0.99] text-white font-black text-sm rounded-xl transition shadow-lg shadow-emerald-950/60 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                <span>Cobrar Venta &bull; ${totalUsd.toFixed(2)} / Bs. {totalBs.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-              </button>
+              {/* Dual Action Buttons in Cart: Cobrar Fiscal (ACLAS PP9) vs Ticket Térmico [+] */}
+              <div className="space-y-2 mt-2">
+                <button
+                  type="button"
+                  disabled={cart.length === 0}
+                  onClick={handleOpenCheckoutModal}
+                  className="w-full py-3 bg-blue-600 hover:bg-blue-500 active:scale-[0.99] text-white font-black text-xs sm:text-sm rounded-xl transition shadow-lg shadow-blue-950/60 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                  title="Cobrar y emitir Factura Fiscal oficial en impresora ACLAS PP9-PLUS"
+                >
+                  <FileText className="w-4 h-4 text-blue-200" />
+                  <span>Cobrar (Factura Fiscal ACLAS PP9) &bull; ${totalUsd.toFixed(2)}</span>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={cart.length === 0 || isProcessing}
+                  onClick={handleQuickThermalCheckout}
+                  className="w-full py-2.5 bg-emerald-700/80 hover:bg-emerald-600 border border-emerald-500/50 active:scale-[0.99] text-emerald-100 font-bold text-xs rounded-xl transition shadow-md flex items-center justify-center gap-2 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                  title="Cobro rápido e impresión en Ticket Térmico 80mm [Atajo: Tecla +]"
+                >
+                  <Printer className="w-3.5 h-3.5 text-emerald-300" />
+                  <span>Ticket Térmico 80mm (Nota de Entrega)</span>
+                  <kbd className="px-1.5 py-0.5 bg-emerald-950 text-emerald-300 rounded font-mono text-[10px] font-black border border-emerald-500/40 shadow-xs">
+                    +
+                  </kbd>
+                </button>
+              </div>
 
             </div>
 
@@ -1615,12 +1910,12 @@ export const PosView: React.FC<PosViewProps> = ({
 
             </div>
 
-            {/* Actions */}
-            <div className="pt-2 flex items-center gap-3">
+            {/* Actions: Factura Fiscal vs Ticket Térmico [+] vs Cancelar */}
+            <div className="pt-2 flex flex-col sm:flex-row items-stretch gap-2.5">
               <button
                 type="button"
                 onClick={() => setIsPaymentModalOpen(false)}
-                className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl transition cursor-pointer"
+                className="py-3 px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl transition cursor-pointer order-last sm:order-first"
               >
                 Cancelar
               </button>
@@ -1628,18 +1923,33 @@ export const PosView: React.FC<PosViewProps> = ({
               <button
                 type="button"
                 disabled={isProcessing || diffUsd > 0.009}
-                onClick={handleExecuteCheckout}
-                className="flex-2 py-3 bg-emerald-600 hover:bg-emerald-500 active:scale-[0.99] text-white font-black text-sm rounded-xl transition shadow-lg shadow-emerald-950/50 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={() => handleExecuteCheckout('thermal')}
+                className="flex-1 py-3 px-3 bg-emerald-700/80 hover:bg-emerald-600 border border-emerald-500/50 active:scale-[0.99] text-white font-bold text-xs rounded-xl transition shadow-md flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Cobrar e imprimir comprobante térmico 80mm [Atajo: Tecla +]"
+              >
+                <Printer className="w-4 h-4 text-emerald-200" />
+                <span>Ticket Térmico (80mm)</span>
+                <kbd className="px-1.5 py-0.5 bg-emerald-950 text-emerald-300 rounded font-mono text-[10px] font-black border border-emerald-500/40">
+                  +
+                </kbd>
+              </button>
+
+              <button
+                type="button"
+                disabled={isProcessing || diffUsd > 0.009}
+                onClick={() => handleExecuteCheckout('fiscal')}
+                className="flex-2 py-3 px-4 bg-blue-600 hover:bg-blue-500 active:scale-[0.99] text-white font-black text-xs sm:text-sm rounded-xl transition shadow-lg shadow-blue-950/50 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Cobrar y emitir Factura Fiscal oficial en impresora ACLAS PP9-PLUS"
               >
                 {isProcessing ? (
                   <>
-                    <RefreshCw className="w-4 h-4 animate-spin" />
-                    <span>Facturando...</span>
+                    <RefreshCw className="w-4 h-4 animate-spin text-blue-200" />
+                    <span>Emitiendo Fiscal...</span>
                   </>
                 ) : (
                   <>
-                    <CheckCircle2 className="w-4 h-4" />
-                    <span>{saleType === 'CREDITO' ? 'Registrar Venta a Crédito' : 'Completar Venta e Imprimir'}</span>
+                    <FileText className="w-4 h-4 text-blue-200" />
+                    <span>Factura Fiscal (ACLAS PP9)</span>
                   </>
                 )}
               </button>
@@ -2414,6 +2724,136 @@ export const PosView: React.FC<PosViewProps> = ({
         <div className="fixed bottom-5 left-5 z-50 px-4 py-3 rounded-2xl shadow-2xl border bg-emerald-950 border-emerald-500 text-emerald-200 flex items-center gap-2.5 text-xs font-bold animate-in slide-in-from-bottom-5">
           <CheckCircle2 className="w-4 h-4 text-emerald-400" />
           <span>{customerSuccessToast}</span>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL: DIAGNÓSTICO Y CONEXIÓN DE IMPRESORA FISCAL (ACLAS PP9-PLUS)        */}
+      {/* ========================================================================= */}
+      {showFiscalDiagnosticModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-[#162032] border border-slate-800 rounded-3xl p-6 w-full max-w-lg text-white shadow-2xl space-y-4">
+            
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-3">
+                <div className={`p-2.5 rounded-xl border ${
+                  fiscalBridgeStatus.online 
+                    ? 'bg-blue-500/20 text-blue-400 border-blue-500/40' 
+                    : 'bg-amber-500/20 text-amber-400 border-amber-500/40'
+                }`}>
+                  <Landmark className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-white flex items-center gap-2">
+                    <span>Impresora Fiscal ACLAS PP9-PLUS</span>
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${
+                      fiscalBridgeStatus.online
+                        ? 'bg-blue-500/20 text-blue-300 border border-blue-500/40'
+                        : 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                    }`}>
+                      {fiscalBridgeStatus.online ? '● Conectada' : '○ Desconectada'}
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Homologación Oficial SENIAT • The Factory HKA
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowFiscalDiagnosticModal(false)}
+                className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Diagnostic Details */}
+            <div className="bg-[#0f172a] rounded-2xl p-4 border border-slate-800 space-y-2.5 text-xs font-mono">
+              <div className="flex justify-between border-b border-slate-800 pb-2">
+                <span className="text-slate-400">Microservicio Local:</span>
+                <span className={fiscalBridgeStatus.online ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>
+                  {fiscalBridgeStatus.online ? 'http://127.0.0.1:9095 (ONLINE)' : 'SIN RESPUESTA'}
+                </span>
+              </div>
+              <div className="flex justify-between border-b border-slate-800 pb-2">
+                <span className="text-slate-400">Modelo Homologado:</span>
+                <span className="text-white font-bold">ACLAS PP9 - PLUS (The Factory HKA)</span>
+              </div>
+              <div className="flex justify-between border-b border-slate-800 pb-2">
+                <span className="text-slate-400">Puerto de Comunicación:</span>
+                <span className="text-blue-400 font-bold">
+                  {fiscalBridgeStatus.info?.assignedPort || settings?.fiscal_printer_port || 'USB / COM'} (9600 bps, 8E1)
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-400">Protocolo SENIAT:</span>
+                <span className="text-slate-200">The Factory HKA V8.5.0 (STX/ETX/LRC)</span>
+              </div>
+            </div>
+
+            {/* Test result box */}
+            {fiscalTestResult && (
+              <div className={`p-3 rounded-xl border text-xs font-mono ${
+                fiscalTestResult.success 
+                  ? 'bg-emerald-950/60 border-emerald-500/40 text-emerald-200' 
+                  : 'bg-rose-950/60 border-rose-500/40 text-rose-200'
+              }`}>
+                <div className="font-bold mb-1">
+                  {fiscalTestResult.success ? '✓ Respuesta del Equipo Homologado:' : '⚠️ Error de Comunicación:'}
+                </div>
+                <div>{fiscalTestResult.message || fiscalTestResult.error}</div>
+                {fiscalTestResult.model && <div>• Modelo: {fiscalTestResult.model}</div>}
+                {fiscalTestResult.port && <div>• Puerto: {fiscalTestResult.port}</div>}
+              </div>
+            )}
+
+            {/* Help instructions if offline */}
+            {!fiscalBridgeStatus.online && (
+              <div className="p-3 bg-amber-950/40 border border-amber-800/40 rounded-xl text-xs text-amber-200/90 space-y-1">
+                <p className="font-bold flex items-center gap-1.5 text-amber-300">
+                  <AlertCircle className="w-4 h-4" />
+                  <span>¿Cómo iniciar el puente fiscal?</span>
+                </p>
+                <p>1. Conecta la impresora ACLAS PP9-PLUS con el cable USB a la computadora de caja y enciéndela.</p>
+                <p>2. Abre la carpeta <code>fiscal-bridge</code> en esta máquina y ejecuta <strong>iniciar-impresora-fiscal.bat</strong> (o <strong>INSTALAR-INICIO-AUTOMATICO.bat</strong>).</p>
+                <p>3. Pulsa "Reintentar Conexión" a continuación.</p>
+              </div>
+            )}
+
+            {/* Actions */}
+            <div className="flex flex-wrap gap-2 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={checkFiscalBridge}
+                className="flex-1 py-2.5 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer border border-slate-700"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>Reintentar Conexión</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleTestFiscalPing}
+                disabled={fiscalDiagnosticLoading}
+                className="flex-1 py-2.5 px-3 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-md"
+              >
+                <Sparkles className={`w-3.5 h-3.5 ${fiscalDiagnosticLoading ? 'animate-spin' : ''}`} />
+                <span>{fiscalDiagnosticLoading ? 'Probando...' : 'Probar Impresora (ENQ)'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleOpenDrawerFiscal}
+                className="py-2.5 px-3 bg-slate-800 hover:bg-slate-700 text-amber-400 font-bold text-xs rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer border border-slate-700"
+                title="Enviar comando para abrir la gaveta de dinero conectada a la impresora"
+              >
+                <Landmark className="w-3.5 h-3.5" />
+                <span>Abrir Gaveta</span>
+              </button>
+            </div>
+
+          </div>
         </div>
       )}
 

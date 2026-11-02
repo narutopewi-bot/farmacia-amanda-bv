@@ -7,7 +7,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { db, initDatabase, clearTestData } from './db.js';
-import { executeFiscalInvoice, executeReportX, executeReportZ, executeOpenDrawer, testFiscalPrinter, getAvailableComPorts } from './fiscalService.js';
+import { executeFiscalInvoice, executeReportX, executeReportZ, executeOpenDrawer, testFiscalPrinter, getAvailableComPorts, getFiscalBridgeStatus } from './fiscalService.js';
 
 import compression from 'compression';
 
@@ -213,6 +213,19 @@ app.post('/api/fiscal/open-drawer', async (req, res) => {
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/fiscal/status', async (req, res) => {
+  try {
+    const status = await getFiscalBridgeStatus();
+    if (status) {
+      res.json({ online: true, ...status });
+    } else {
+      res.json({ online: false, message: 'Puente fiscal no responde en localhost:9095' });
+    }
+  } catch (err) {
+    res.json({ online: false, error: err.message });
   }
 });
 

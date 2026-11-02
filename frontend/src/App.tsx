@@ -62,6 +62,7 @@ export function App() {
     }
   });
   const [showLoginModal, setShowLoginModal] = useState<boolean>(false);
+  const [receiptAutoPrintMode, setReceiptAutoPrintMode] = useState<'thermal' | 'fiscal' | null>(null);
 
   // Check URL view parameter (e.g. ?view=store, /tienda, /store, #tienda)
   useEffect(() => {
@@ -561,8 +562,9 @@ export function App() {
                     settings={settings}
                     onUpdateExchangeRate={handleUpdateExchangeRate}
                     onRefresh={fetchAllData}
-                    onSaleComplete={(sale) => {
+                    onSaleComplete={(sale, printMode = 'fiscal') => {
                       fetchAllData();
+                      setReceiptAutoPrintMode(printMode);
                       setCurrentSaleReceipt(sale);
                     }}
                   />
@@ -729,7 +731,11 @@ export function App() {
       <ReceiptModal
         sale={currentSaleReceipt}
         settings={settings}
-        onClose={() => setCurrentSaleReceipt(null)}
+        autoPrintMode={receiptAutoPrintMode}
+        onClose={() => {
+          setCurrentSaleReceipt(null);
+          setReceiptAutoPrintMode(null);
+        }}
       />
 
       {/* Login Modal: Activated if no user session or user clicked 'Ingresar' */}

@@ -1,14 +1,15 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Printer, X, CheckCircle2, FileText, Loader2 } from 'lucide-react';
 import { Sale, Settings } from '../types';
 
 interface ReceiptModalProps {
   sale: Sale | null;
   settings?: Settings;
+  autoPrintMode?: 'thermal' | 'fiscal' | null;
   onClose: () => void;
 }
 
-export const ReceiptModal: React.FC<ReceiptModalProps> = ({ sale, settings, onClose }) => {
+export const ReceiptModal: React.FC<ReceiptModalProps> = ({ sale, settings, autoPrintMode, onClose }) => {
   if (!sale) return null;
 
   const [isFiscalPrinting, setIsFiscalPrinting] = useState(false);
@@ -40,6 +41,18 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ sale, settings, onCl
       setIsFiscalPrinting(false);
     }
   };
+
+  // Disparo automático según modo seleccionado (térmico o fiscal)
+  useEffect(() => {
+    if (autoPrintMode === 'thermal') {
+      const timer = setTimeout(() => {
+        window.print();
+      }, 400);
+      return () => clearTimeout(timer);
+    } else if (autoPrintMode === 'fiscal' && !sale.fiscal_invoice_number) {
+      handleFiscalPrint();
+    }
+  }, [sale?.id, autoPrintMode]);
 
   const rate = sale.exchange_rate || settings?.exchange_rate || 85.0;
   const totalBs = sale.total_bs || (sale.total * rate);
