@@ -447,9 +447,10 @@ class HkaAclasDriver:
             return False, msg
 
         self.cancel_document()
-        time.sleep(0.2)
-        ok, msg = self.send_cmd("I0X", wait_sec=3.0)
+        time.sleep(0.15)
+        ok, msg = self.send_cmd("I0X", wait_sec=0.1)
         if ok:
+            time.sleep(1.5)
             return True, "Reporte X emitido con éxito en el papel físico."
         return False, f"La impresora rechazó el Reporte X: {msg}"
 
@@ -460,13 +461,14 @@ class HkaAclasDriver:
             return False, msg
 
         self.cancel_document()
-        time.sleep(0.2)
-        ok, msg = self.send_cmd("I0Z", wait_sec=8.0)
+        time.sleep(0.15)
+        ok, msg = self.send_cmd("I0Z", wait_sec=0.1)
         if not ok:
             return False, f"La impresora rechazó el Reporte Z: {msg}"
 
+        # Esperar a que el cabezal imprima y grabe en memoria fiscal
+        time.sleep(3.0)
         # Obtener el número de Z emitido
-        time.sleep(1.0)
         s1, _ = self.get_s1_data()
         z_num = s1.get("dailyClosureCounter", "Z-OK") if s1 else "Z-OK"
         return True, f"Reporte Z (Cierre Diario) emitido con éxito. N° {z_num}"

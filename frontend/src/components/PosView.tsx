@@ -349,6 +349,66 @@ export const PosView: React.FC<PosViewProps> = ({
     }
   };
 
+  const [fiscalReportLoading, setFiscalReportLoading] = useState<'x' | 'z' | null>(null);
+
+  const handleExecuteFiscalReport = async (type: 'x' | 'z') => {
+    if (type === 'z') {
+      if (!window.confirm('¿Está seguro de emitir el REPORTE Z de Cierre Fiscal Diario? Esta acción grabará las ventas en la memoria fiscal del SENIAT y cerrará la jornada del día.')) {
+        return;
+      }
+    }
+    setFiscalReportLoading(type);
+    try {
+      const targetPort = selectedFiscalPort || settings?.fiscal_printer_port || 'USB';
+      let data = null;
+
+      // 1. Probar directamente contra el puente fiscal en localhost (PC de caja física)
+      try {
+        const localRes = await fetch(`http://127.0.0.1:9095/api/fiscal/report-${type}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: 'ACLAS PP9 - PLUS',
+            port: targetPort
+          }),
+          signal: AbortSignal.timeout(type === 'z' ? 35000 : 20000)
+        });
+        if (localRes.ok) {
+          data = await localRes.json();
+        } else {
+          const errData = await localRes.json();
+          throw new Error(errData.error || errData.message || 'Error en hardware fiscal');
+        }
+      } catch (localErr: any) {
+        console.warn(`Local bridge direct call error for report-${type}:`, localErr);
+        if (localErr.message && !localErr.message.includes('Failed to fetch')) {
+          throw localErr;
+        }
+      }
+
+      // 2. Si no respondió directo, consultar a través del backend
+      if (!data) {
+        const res = await fetch(`/api/fiscal/report-${type}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ port: targetPort })
+        });
+        data = await res.json();
+      }
+
+      if (data.success) {
+        showPosNotification(data.message || `✓ Reporte ${type.toUpperCase()} emitido exitosamente por la ACLAS PP9-PLUS`, 'success');
+        checkFiscalBridge();
+      } else {
+        showPosNotification(`⚠️ Aviso fiscal: ${data.error || data.message}`, 'error');
+      }
+    } catch (err: any) {
+      showPosNotification(`Error emitiendo Reporte ${type.toUpperCase()}: ${err.message}`, 'error');
+    } finally {
+      setFiscalReportLoading(null);
+    }
+  };
+
   const fetchCajasPos = async () => {
     try {
       const res = await fetch('/api/cajas/estado');
@@ -1222,14 +1282,14 @@ export const PosView: React.FC<PosViewProps> = ({
       </div>
 
       {/* ========================================================================= */}
-      {/* 3. MAIN WORKSPACE: BALANCED GRID (7 COLS PRODUCTS + 5 COLS WIDE CART)       */}
+      {/* 3. MAIN WORKSPACE: COMPACT CATALOG (5 COLS) + MASSIVE BILLING PANEL (7 COLS) */}
       {/* ========================================================================= */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
         
         {/* ----------------------------------------------------------------------- */}
-        {/* LEFT: TOUCH CARDS GRID (7 cols on Desktop for optimal space)            */}
+        {/* LEFT: COMPACT PRODUCT SEARCH & CATALOG (5 cols on Desktop)              */}
         {/* ----------------------------------------------------------------------- */}
-        <div className="lg:col-span-7 xl:col-span-7 space-y-4">
+        <div className="lg:col-span-5 xl:col-span-5 space-y-4">
           {filteredProducts.length === 0 ? (
             <div className="bg-[#162032] border border-slate-800 rounded-2xl p-16 text-center text-slate-400 space-y-2">
               <Package className="w-12 h-12 mx-auto text-slate-600 mb-2" />
@@ -1237,7 +1297,7 @@ export const PosView: React.FC<PosViewProps> = ({
               <p className="text-xs text-slate-400">Intenta con otro término de búsqueda o selecciona otra categoría.</p>
             </div>
           ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-3 2xl:grid-cols-4 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-2 2xl:grid-cols-3 gap-3">
               {filteredProducts.map(product => {
                 const qtyInCart = cartQuantityMap[product.id] || 0;
                 const isOutOfStock = product.total_stock <= 0;
@@ -1253,7 +1313,7 @@ export const PosView: React.FC<PosViewProps> = ({
                     }`}
                   >
                     {/* White Image Container */}
-                    <div className="w-full bg-white rounded-xl h-32 flex items-center justify-center p-2.5 relative overflow-hidden shadow-inner">
+                    <div className="w-full bg-white rounded-xl h-28 sm:h-32 flex items-center justify-center p-2 relative overflow-hidden shadow-inner">
                       
                       {/* Green Stock Pill on Top Right of White Container */}
                       <span className={`absolute top-2 right-2 text-[10px] font-black px-2 py-0.5 rounded-md shadow-xs ${
@@ -1327,18 +1387,18 @@ export const PosView: React.FC<PosViewProps> = ({
         </div>
 
         {/* ----------------------------------------------------------------------- */}
-        {/* RIGHT: EXPANDED COMFORTABLE CART DRAWER (5 cols on Desktop)             */}
+        {/* RIGHT: EXPANDED COMFORTABLE CART DRAWER (7 cols on Desktop - Maximum Space) */}
         {/* ----------------------------------------------------------------------- */}
-        <div className="hidden lg:block lg:col-span-5 xl:col-span-5 sticky top-20">
-          <div className="bg-[#162032] border border-slate-800/90 rounded-2xl p-4 sm:p-5 flex flex-col justify-between shadow-2xl min-h-[580px] text-white">
+        <div className="hidden lg:block lg:col-span-7 xl:col-span-7 sticky top-20">
+          <div className="bg-[#162032] border border-slate-800/90 rounded-2xl p-5 sm:p-6 flex flex-col justify-between shadow-2xl min-h-[640px] text-white">
             
             <div>
               {/* Header: Cart (X) and Close/Clear */}
               <div className="flex items-center justify-between pb-3.5 border-b border-slate-800">
                 <div className="flex items-center gap-2.5">
                   <ShoppingCart className="w-5 h-5 text-emerald-400" />
-                  <h2 className="text-lg font-black text-white tracking-wide">
-                    Orden de Cobro <span className="text-emerald-400 font-extrabold font-mono text-base">({cart.reduce((a, b) => a + b.quantity, 0)})</span>
+                  <h2 className="text-lg sm:text-xl font-black text-white tracking-wide">
+                    Orden de Cobro y Facturación <span className="text-emerald-400 font-extrabold font-mono text-base">({cart.reduce((a, b) => a + b.quantity, 0)} ítems)</span>
                   </h2>
                 </div>
                 {cart.length > 0 && (
@@ -1353,20 +1413,20 @@ export const PosView: React.FC<PosViewProps> = ({
               </div>
 
               {/* Cart Items List with Enriched Visual Details */}
-              <div className="py-3 space-y-3 max-h-[380px] overflow-y-auto pr-1">
+              <div className="py-3.5 space-y-3.5 max-h-[460px] overflow-y-auto pr-2">
                 {cart.length === 0 ? (
-                  <div className="py-16 text-center text-slate-500 space-y-1">
-                    <p className="text-sm font-bold text-slate-400">El carrito está vacío</p>
-                    <p className="text-xs text-slate-500">Toca cualquier medicamento del catálogo para añadirlo a la orden.</p>
+                  <div className="py-20 text-center text-slate-500 space-y-1">
+                    <p className="text-base font-bold text-slate-300">El carrito de cobro está vacío</p>
+                    <p className="text-xs text-slate-500">Toca cualquier medicamento del catálogo de la izquierda para cargarlo a la orden.</p>
                   </div>
                 ) : (
                   cart.map(({ product, quantity }) => (
                     <div
                       key={product.id}
-                      className="bg-[#0f172a] rounded-xl p-3 flex items-start gap-3 border border-slate-800/80 hover:border-slate-700 transition shadow-sm"
+                      className="bg-[#0f172a] rounded-2xl p-3.5 flex items-start gap-3.5 border border-slate-800/80 hover:border-slate-700 transition shadow-sm"
                     >
                       {/* White Box Thumbnail */}
-                      <div className="w-14 h-14 bg-white rounded-xl p-1.5 shrink-0 flex items-center justify-center overflow-hidden shadow-xs mt-0.5">
+                      <div className="w-16 h-16 bg-white rounded-xl p-1.5 shrink-0 flex items-center justify-center overflow-hidden shadow-xs mt-0.5">
                         {product.image_url ? (
                           <img
                             src={product.image_url}
@@ -1375,47 +1435,48 @@ export const PosView: React.FC<PosViewProps> = ({
                             className="max-h-full max-w-full object-contain"
                           />
                         ) : (
-                          <span className="text-slate-800 font-extrabold text-xs">RX</span>
+                          <span className="text-slate-800 font-extrabold text-sm">RX</span>
                         )}
                       </div>
 
                       {/* Product Name and Price Row */}
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-start justify-between gap-2">
-                          <h4 className="text-white font-black text-xs sm:text-sm leading-snug line-clamp-2">
-                            {product.name}
-                          </h4>
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <h4 className="text-white font-black text-sm sm:text-base leading-snug">
+                              {product.name}
+                            </h4>
+                            <p className="text-slate-400 text-xs font-medium mt-0.5">
+                              {product.generic_name || product.presentation || 'Medicamento'} &bull; <span className="text-slate-300 font-mono">${product.selling_price.toFixed(2)} c/u</span>
+                            </p>
+                          </div>
                           <div className="text-right shrink-0">
-                            <span className="text-white font-black text-xs sm:text-sm font-mono block">
+                            <span className="text-emerald-400 font-black text-base sm:text-lg font-mono block">
                               ${(product.selling_price * quantity).toFixed(2)}
                             </span>
-                            <span className="text-slate-400 text-[10px] font-mono block">
+                            <span className="text-slate-300 text-xs sm:text-sm font-bold font-mono block">
                               Bs. {(product.selling_price * quantity * rate).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </span>
                           </div>
                         </div>
-
-                        <p className="text-slate-400 text-[11px] truncate mt-0.5">
-                          {product.generic_name || product.presentation || 'Medicamento'}
-                        </p>
                         
                         {/* Stepper inline */}
-                        <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-800/80">
+                        <div className="flex items-center justify-between mt-2.5 pt-2 border-t border-slate-800/80">
                           <div className="flex items-center gap-2">
                             <button
                               type="button"
                               onClick={() => updateQuantity(product.id, quantity - 1)}
-                              className="w-7 h-7 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-100 flex items-center justify-center text-sm font-black transition cursor-pointer"
+                              className="w-8 h-8 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-100 flex items-center justify-center text-base font-black transition cursor-pointer"
                             >
                               -
                             </button>
-                            <span className="text-sm font-black text-emerald-400 font-mono w-6 text-center">
+                            <span className="text-base font-black text-white font-mono w-8 text-center">
                               {quantity}
                             </span>
                             <button
                               type="button"
                               onClick={() => updateQuantity(product.id, quantity + 1)}
-                              className="w-7 h-7 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-100 flex items-center justify-center text-sm font-black transition cursor-pointer"
+                              className="w-8 h-8 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-100 flex items-center justify-center text-base font-black transition cursor-pointer"
                             >
                               +
                             </button>
@@ -1424,10 +1485,11 @@ export const PosView: React.FC<PosViewProps> = ({
                           <button
                             type="button"
                             onClick={() => removeFromCart(product.id)}
-                            className="p-1 text-slate-500 hover:text-rose-400 cursor-pointer transition rounded"
+                            className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-950/30 rounded-lg cursor-pointer transition flex items-center gap-1 text-xs font-semibold"
                             title="Eliminar de la orden"
                           >
-                            <Trash2 className="w-3.5 h-3.5" />
+                            <Trash2 className="w-4 h-4 text-rose-400" />
+                            <span className="text-rose-400 hidden sm:inline">Quitar</span>
                           </button>
                         </div>
                       </div>
@@ -1439,7 +1501,7 @@ export const PosView: React.FC<PosViewProps> = ({
             </div>
 
             {/* Bottom Summary */}
-            <div className="pt-3 border-t border-slate-800 space-y-2">
+            <div className="pt-3 border-t border-slate-800 space-y-2.5">
               
               <div className="flex items-center justify-between text-xs text-slate-300">
                 <span>Subtotal</span>
@@ -1459,13 +1521,16 @@ export const PosView: React.FC<PosViewProps> = ({
               </div>
 
               {/* Total Display */}
-              <div className="flex items-baseline justify-between pt-2 border-t border-slate-700/80">
-                <span className="text-xs uppercase font-extrabold text-slate-300">Total a Pagar</span>
+              <div className="flex items-baseline justify-between pt-2.5 pb-1 border-t border-slate-700/80">
+                <div>
+                  <span className="text-xs sm:text-sm uppercase font-black text-slate-300 tracking-wider block">Total a Pagar</span>
+                  <span className="text-[11px] text-slate-400">Impuestos y tasa incluidos</span>
+                </div>
                 <div className="text-right">
-                  <span className="text-xl sm:text-2xl font-black text-white font-mono block leading-none">
+                  <span className="text-2xl sm:text-3xl font-black text-white font-mono block leading-none">
                     ${totalUsd.toFixed(2)}
                   </span>
-                  <span className="text-xs font-bold text-emerald-400 font-mono mt-1 block">
+                  <span className="text-sm sm:text-base font-bold text-emerald-400 font-mono mt-1 block">
                     Bs. {(totalUsd * rate).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </span>
                 </div>
@@ -1554,7 +1619,7 @@ export const PosView: React.FC<PosViewProps> = ({
                   type="button"
                   disabled={cart.length === 0}
                   onClick={handleOpenCheckoutModal}
-                  className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-500 active:scale-[0.99] text-white font-black text-sm sm:text-base rounded-2xl transition shadow-xl shadow-emerald-950/50 flex items-center justify-center gap-2.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 active:scale-[0.99] text-white font-black text-base sm:text-lg rounded-2xl transition shadow-xl shadow-emerald-950/50 flex items-center justify-center gap-2.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                   title="Cobrar orden de venta"
                 >
                   <CreditCard className="w-5 h-5 text-emerald-100" />
@@ -2901,6 +2966,47 @@ export const PosView: React.FC<PosViewProps> = ({
                 <p>3. Pulsa "Reintentar Conexión" a continuación.</p>
               </div>
             )}
+
+            {/* Reportes Fiscales Oficiales SENIAT (X y Z) */}
+            <div className="bg-[#0f172a] rounded-2xl p-4 border border-slate-800 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="font-extrabold text-xs text-white flex items-center gap-1.5">
+                  <FileText className="w-3.5 h-3.5 text-blue-400" />
+                  <span>Reportes Fiscales Oficiales (SENIAT)</span>
+                </span>
+                <span className="text-[10px] text-slate-400 font-mono">ACLAS PP9 - PLUS</span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2.5">
+                <button
+                  type="button"
+                  disabled={fiscalReportLoading !== null}
+                  onClick={() => handleExecuteFiscalReport('x')}
+                  className="py-2.5 px-3 bg-blue-950/70 hover:bg-blue-900/80 border border-blue-700/60 text-blue-200 rounded-xl text-xs font-black transition flex flex-col items-center justify-center gap-0.5 cursor-pointer disabled:opacity-50 shadow-sm"
+                  title="Emitir Reporte X (Lectura Parcial sin Cierre)"
+                >
+                  <span className="text-sm font-black flex items-center gap-1.5">
+                    {fiscalReportLoading === 'x' && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                    REPORTE X
+                  </span>
+                  <span className="text-[9px] text-blue-300 font-normal">Corte Parcial / Arqueo</span>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={fiscalReportLoading !== null}
+                  onClick={() => handleExecuteFiscalReport('z')}
+                  className="py-2.5 px-3 bg-[#cf152b]/25 hover:bg-[#cf152b]/40 border border-red-700/60 text-red-200 rounded-xl text-xs font-black transition flex flex-col items-center justify-center gap-0.5 cursor-pointer disabled:opacity-50 shadow-sm"
+                  title="Emitir Reporte Z (Cierre Fiscal Diario Oficial SENIAT)"
+                >
+                  <span className="text-sm font-black flex items-center gap-1.5">
+                    {fiscalReportLoading === 'z' && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                    REPORTE Z
+                  </span>
+                  <span className="text-[9px] text-red-300 font-normal">Cierre Fiscal Diario</span>
+                </button>
+              </div>
+            </div>
 
             {/* Actions */}
             <div className="flex flex-wrap gap-2 pt-2 border-t border-slate-800">

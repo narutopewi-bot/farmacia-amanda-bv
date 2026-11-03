@@ -295,8 +295,43 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     }
     setFiscalActionLoading(true);
     try {
-      const res = await fetch(`/api/fiscal/${action}`, { method: 'POST' });
-      const data = await res.json();
+      const targetPort = fiscalForm.fiscal_printer_port || settings.fiscal_printer_port || 'USB';
+      let data = null;
+
+      // 1. Probar directamente contra el puente en localhost (PC de caja)
+      try {
+        const localRes = await fetch(`http://127.0.0.1:9095/api/fiscal/${action}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: 'ACLAS PP9 - PLUS',
+            port: targetPort
+          }),
+          signal: AbortSignal.timeout(action === 'report-z' ? 35000 : 20000)
+        });
+        if (localRes.ok) {
+          data = await localRes.json();
+        } else {
+          const errData = await localRes.json();
+          throw new Error(errData.error || errData.message || 'Error retornado por la impresora fiscal');
+        }
+      } catch (localErr: any) {
+        console.warn(`Local bridge direct call error for ${action}:`, localErr);
+        if (localErr.message && !localErr.message.includes('Failed to fetch')) {
+          throw localErr;
+        }
+      }
+
+      // 2. Si no respondió directo, consultar a través del backend
+      if (!data) {
+        const res = await fetch(`/api/fiscal/${action}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ port: targetPort })
+        });
+        data = await res.json();
+      }
+
       if (data.success) {
         showNotification(data.message || 'Operación fiscal ejecutada correctamente.');
       } else {
