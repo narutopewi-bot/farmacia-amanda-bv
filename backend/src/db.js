@@ -437,6 +437,63 @@ export function initDatabase() {
   } catch(e) {
     console.error('[DATABASE] Error sembrando catálogo:', e);
   }
+
+  // Sembrar factura inicial de prueba FAC-000001 si no hay ventas
+  try {
+    const sCount = db.prepare('SELECT count(*) as count FROM sales').get()?.count || 0;
+    if (sCount === 0) {
+      console.log('[DATABASE] Restaurando factura fiscal FAC-000001 (Bromhexina)...');
+      let prod = db.prepare("SELECT id FROM products WHERE name LIKE '%Bromhexina%' LIMIT 1").get();
+      let prodId = prod ? prod.id : null;
+      if (!prodId) {
+        const insP = db.prepare(`
+          INSERT INTO products (code, name, generic_name, category, presentation, laboratory, prescription_required, cost_price, selling_price, min_stock, has_iva, iva_percent, profit_margin)
+          VALUES ('BROM-001', 'Bromhexina 4 MG', 'Bromhexina', 'Respiratorio', 'Jarabe / Solución', 'Genérico', 0, 1.20, 2.27, 5, 0, 0, 89.17)
+        `).run();
+        prodId = insP.lastInsertRowid;
+      }
+
+      let batch = db.prepare("SELECT id FROM batches WHERE product_id = ? LIMIT 1").get(prodId);
+      let batchId = batch ? batch.id : null;
+      if (!batchId) {
+        const insB = db.prepare(`
+          INSERT INTO batches (product_id, batch_number, expiry_date, stock, initial_stock, cost_price)
+          VALUES (?, '25EGL07', '2028-04-01', 6, 6, 1.20)
+        `).run(prodId);
+        batchId = insB.lastInsertRowid;
+      }
+
+      const insSale = db.prepare(`
+        INSERT INTO sales (
+          invoice_number, customer_id, employee_id, cash_register_id, sale_type,
+          payment_method, subtotal, discount, tax, total, amount_paid, change_given,
+          is_credit, notes, created_at, exchange_rate, total_bs, change_currency,
+          change_amount, sync_status, fiscal_invoice_number, fiscal_serial, status
+        ) VALUES (
+          'FAC-000001', 1, 1, 1, 'DIRECT',
+          'CASH_BS', 2.27, 0.0, 0.0, 2.27, 2.27, 0.0,
+          0, 'Factura impresa en prueba física de impresora ACLAS PP9',
+          '2026-11-03 00:32:10', 889.58, 2019.35, 'USD',
+          0.0, 'SYNCED', '00000003', 'ACLAS-PP9', 'PAID'
+        )
+      `).run();
+      const saleId = insSale.lastInsertRowid;
+
+      db.prepare(`
+        INSERT INTO sale_items (sale_id, product_id, batch_id, quantity, unit_price, unit_cost, subtotal)
+        VALUES (?, ?, ?, 1, 2.27, 1.20, 2.27)
+      `).run(saleId, prodId, batchId);
+
+      db.prepare(`
+        INSERT INTO sale_payments (sale_id, payment_method, currency, amount, amount_usd, amount_bs)
+        VALUES (?, 'CASH_BS', 'VES', 2019.35, 2.27, 2019.35)
+      `).run(saleId);
+
+      console.log('[DATABASE] Factura inicial FAC-000001 restaurada con éxito.');
+    }
+  } catch (e) {
+    console.error('[DATABASE] Error restaurando factura inicial:', e);
+  }
 }
 
 export function clearTestData() {
