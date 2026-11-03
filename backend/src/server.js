@@ -310,8 +310,8 @@ app.post('/api/sales/:id/void', (req, res) => {
     // 1. Reingresar mercancía al inventario (Lotes y Movimientos de Stock)
     const updateBatchStock = db.prepare('UPDATE batches SET stock = stock + ? WHERE id = ?');
     const insertStockMovement = db.prepare(`
-      INSERT INTO stock_movements (product_id, batch_id, movement_type, quantity, reason, reference_id, employee_id)
-      VALUES (?, ?, 'IN', ?, 'ANULACION_VENTA', ?, ?)
+      INSERT INTO stock_movements (product_id, batch_id, type, quantity, reason, reference_id, employee_id)
+      VALUES (?, ?, 'IN', ?, ?, ?, ?)
     `);
 
     for (const it of items) {
