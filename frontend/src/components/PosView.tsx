@@ -175,6 +175,7 @@ export const PosView: React.FC<PosViewProps> = ({
   const [saleToVoid, setSaleToVoid] = useState<any | null>(null);
   const [voidReason, setVoidReason] = useState<string>('Devolución de mercancía');
   const [isVoidingSale, setIsVoidingSale] = useState<boolean>(false);
+  const [posTargetFiscalNumber, setPosTargetFiscalNumber] = useState<string>('');
 
   const fetchRecentSales = async () => {
     setIsLoadingSalesHistory(true);
@@ -221,7 +222,7 @@ export const PosView: React.FC<PosViewProps> = ({
         const printerPort = settings?.fiscal_printer_port || 'USB';
 
         const creditPayload = {
-          originalInvoiceNumber: voidedSale.fiscal_invoice_number || voidedSale.invoice_number,
+          originalInvoiceNumber: posTargetFiscalNumber || voidedSale.fiscal_invoice_number || voidedSale.invoice_number,
           originalPrinterSerial: voidedSale.fiscal_serial || 'ACLAS-PP9',
           originalInvoiceDate: voidedSale.created_at,
           port: printerPort,
@@ -2710,7 +2711,21 @@ export const PosView: React.FC<PosViewProps> = ({
                 <div className="text-xs text-slate-300 space-y-1">
                   <p><strong>Cliente:</strong> {saleToVoid.customer_name || 'CONSUMIDOR FINAL'} ({saleToVoid.customer_id_number || 'V-00000000'})</p>
                   <p><strong>Total Factura:</strong> ${saleToVoid.total?.toFixed(2)} / Bs. {(saleToVoid.total_bs || (saleToVoid.total * rate)).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-                  <p><strong>Factura Fiscal Afectada:</strong> {saleToVoid.fiscal_invoice_number || 'Provisional'}</p>
+                </div>
+                <div>
+                  <label className="text-[11px] uppercase font-bold text-slate-300 block mb-1">
+                    Nro. Factura Fiscal Afectada (del ticket físico impreso):
+                  </label>
+                  <input
+                    type="text"
+                    value={posTargetFiscalNumber}
+                    onChange={e => setPosTargetFiscalNumber(e.target.value)}
+                    placeholder="Ej: 00000003"
+                    className="w-full bg-[#0f172a] border border-slate-700 rounded-xl px-3 py-2 text-xs font-mono font-bold text-blue-400 focus:outline-none focus:border-blue-500"
+                  />
+                  <span className="text-[10px] text-slate-400 mt-0.5 block">
+                    Confirma el número que imprimió la máquina en papel para que la Nota de Crédito sea válida.
+                  </span>
                 </div>
                 <div>
                   <label className="text-[11px] uppercase font-bold text-slate-300 block mb-1">Motivo de Anulación / Devolución:</label>
@@ -2810,6 +2825,7 @@ export const PosView: React.FC<PosViewProps> = ({
                                 onClick={() => {
                                   setSaleToVoid(s);
                                   setVoidReason('Devolución de mercancía');
+                                  setPosTargetFiscalNumber(s.fiscal_invoice_number || '00000003');
                                 }}
                                 className="px-2.5 py-1 bg-rose-600/20 hover:bg-rose-600 text-rose-300 hover:text-white rounded-lg text-[10px] font-bold border border-rose-500/40 transition cursor-pointer"
                               >

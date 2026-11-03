@@ -1,10 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   BarChart3, DollarSign, TrendingUp, Package, 
   Calendar, CreditCard, PieChart, ArrowUpRight, Download, Filter,
   Printer, RefreshCw, Landmark, ShieldCheck, FileText, CheckCircle2,
   Percent, ArrowRight, HelpCircle, ArrowLeft, Truck, Layers,
-  Sparkles, Check, ChevronRight
+  Sparkles, Check, ChevronRight, X, AlertTriangle, Trash2, Receipt, Search
 } from 'lucide-react';
 import { Settings } from '../types';
 import { InventoryReportView } from './InventoryReportView';
@@ -26,7 +26,211 @@ export const ReportsView: React.FC<Props> = ({ settings }) => {
   const [quickFilter, setQuickFilter] = useState<'TODAY' | 'YESTERDAY' | 'WEEK' | 'MONTH' | 'PREV_MONTH' | 'ALL'>('MONTH');
   const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'SENIAT' | 'PAYMENTS' | 'PRODUCTS' | 'INVOICES'>('OVERVIEW');
   const [reportData, setReportData] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+    const [loading, setLoading] = useState(true);
+
+  // Estados para Anulaciones y Notas de Crédito SENIAT
+  const [saleToVoid, setSaleToVoid] = useState<any>(null);
+  const [targetFiscalNumber, setTargetFiscalNumber] = useState<string>('');
+  const [targetFiscalSerial, setTargetFiscalSerial] = useState<string>('ACLAS-PP9');
+  const [voidReason, setVoidReason] = useState<string>('Devolución de cliente / Corrección de factura');
+  const [transmitToFiscalPrinter, setTransmitToFiscalPrinter] = useState<boolean>(true);
+  const [isVoidingSale, setIsVoidingSale] = useState<boolean>(false);
+  const [invoiceSearch, setInvoiceSearch] = useState<string>('');
+  const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
+
+  // Estados para Nota de Crédito Manual / Fiscal Directa
+  const [showManualNcModal, setShowManualNcModal] = useState<boolean>(false);
+  const [manualNcNumber, setManualNcNumber] = useState<string>('');
+  const [manualNcSerial, setManualNcSerial] = useState<string>('ACLAS-PP9');
+  const [manualNcDate, setManualNcDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [manualNcConcept, setManualNcConcept] = useState<string>('Devolución de medicamentos');
+  const [manualNcAmountUsd, setManualNcAmountUsd] = useState<string>('');
+  const [manualNcAmountBs, setManualNcAmountBs] = useState<string>('');
+  const [isSendingManualNc, setIsSendingManualNc] = useState<boolean>(false);
+
+  const showToast = (text: string, type: 'success' | 'error' | 'info' = 'success') => {
+    setToastMessage({ text, type });
+    setTimeout(() => setToastMessage(null), 5500);
+  };
+
+  const handleOpenVoidModal = (inv: any) => {
+    setSaleToVoid(inv);
+    const defaultNum = inv.fiscal_invoice_number || (inv.invoice_number ? inv.invoice_number.replace(/\D/g, '') : '00000003');
+    setTargetFiscalNumber(defaultNum || '00000003');
+    setTargetFiscalSerial(inv.fiscal_serial || 'ACLAS-PP9');
+    setVoidReason('Devolución de cliente / Corrección de factura');
+    setTransmitToFiscalPrinter(true);
+  };
+
+  const handleExecuteVoidSale = async () => {
+    if (!saleToVoid) return;
+    setIsVoidingSale(true);
+    try {
+      let fullSale = saleToVoid;
+      try {
+        const detRes = await fetch(`/api/sales/${saleToVoid.id}`);
+        if (detRes.ok) {
+          fullSale = await detRes.json();
+        }
+      } catch (e) {
+        console.warn('Could not fetch sale details, using existing info', e);
+      }
+
+      // Anular en backend (reversión de inventario de lotes y estado VOIDED)
+      const voidRes = await fetch(`/api/sales/${saleToVoid.id}/void`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          reason: voidReason || 'Devolución de mercancía',
+          employeeId: 1
+        })
+      });
+      const voidData = await voidRes.json();
+      if (!voidRes.ok) throw new Error(voidData.error || 'Error al anular la venta en sistema');
+
+      // Transmitir Nota de Crédito a la impresora fiscal física en localhost:9095 si está habilitado
+      if (transmitToFiscalPrinter) {
+        try {
+          const LOCAL_BRIDGE = 'http://127.0.0.1:9095';
+          const effectiveRate = Number(fullSale.exchange_rate) || (settings?.exchange_rate || 889.58);
+          const printerPort = settings?.fiscal_printer_port || 'USB';
+
+          const saleItems = (fullSale.items && fullSale.items.length > 0) ? fullSale.items : [
+            {
+              product_name: 'MEDICAMENTO / DEVOLUCION',
+              quantity: 1,
+              unit_price: Number(fullSale.total || 0),
+              tax: 0
+            }
+          ];
+
+          const creditPayload = {
+            originalInvoiceNumber: targetFiscalNumber || fullSale.fiscal_invoice_number || '00000003',
+            originalPrinterSerial: targetFiscalSerial || fullSale.fiscal_serial || 'ACLAS-PP9',
+            originalInvoiceDate: fullSale.created_at || new Date().toISOString().split('T')[0],
+            port: printerPort,
+            model: settings?.fiscal_printer_model || 'ACLAS PP9 - PLUS',
+            client: {
+              name: fullSale.customer_name || 'CONSUMIDOR FINAL',
+              ci: fullSale.customer_id_number || 'V-00000000',
+              address: 'ARENALES, TORRES, LARA',
+              phone: ''
+            },
+            items: saleItems.map((it: any) => ({
+              name: it.product_name || 'MEDICAMENTO',
+              quantity: Number(it.quantity) || 1,
+              salePrice: Number(it.unit_price || 0) * effectiveRate,
+              taxPercentage: 0
+            })),
+            total: Number(fullSale.total || 0) * effectiveRate,
+            exchangeRate: effectiveRate,
+            isConvertedToVes: true,
+            reason: voidReason || 'DEVOLUCION DE MERCANCIA'
+          };
+
+          const ncRes = await fetch(`${LOCAL_BRIDGE}/api/fiscal/credit-note`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(creditPayload),
+            signal: AbortSignal.timeout(35000)
+          });
+
+          const ncData = await ncRes.json();
+          if (ncRes.ok && ncData.success) {
+            const ncNum = ncData.creditNoteNumber || ncData.fiscalInvoiceNumber || targetFiscalNumber;
+            const ncSerial = ncData.printerSerial || targetFiscalSerial || 'ACLAS-PP9';
+            await fetch(`/api/sales/${saleToVoid.id}/credit-note-confirm`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                credit_note_number: ncNum,
+                credit_note_serial: ncSerial
+              })
+            }).catch(console.warn);
+
+            showToast(`✓ Nota de Crédito #${ncNum} emitida con éxito en impresora fiscal ACLAS PP9 y stock devuelto a inventario.`, 'success');
+          } else {
+            showToast(`Venta anulada e inventario devuelto en sistema. Aviso impresora: ${ncData.error || 'Verifique conexión del puente fiscal'}`, 'info');
+          }
+        } catch (fErr: any) {
+          showToast(`Venta anulada e inventario devuelto en sistema. No se pudo conectar al puente fiscal local (localhost:9095)`, 'info');
+        }
+      } else {
+        showToast(`✓ Venta anulada exitosamente en el sistema e inventario devuelto.`, 'success');
+      }
+
+      setSaleToVoid(null);
+      fetchFinancialReport(startDate, endDate);
+    } catch (err: any) {
+      showToast(`Error al anular la venta: ${err.message}`, 'error');
+    } finally {
+      setIsVoidingSale(false);
+    }
+  };
+
+  const handleExecuteManualCreditNote = async () => {
+    if (!manualNcNumber) {
+      showToast('Por favor introduce el número de factura fiscal afectada.', 'error');
+      return;
+    }
+    setIsSendingManualNc(true);
+    try {
+      const LOCAL_BRIDGE = 'http://127.0.0.1:9095';
+      const effectiveRate = Number(settings?.exchange_rate) || 889.58;
+      const amountBs = parseFloat(manualNcAmountBs) || ((parseFloat(manualNcAmountUsd) || 0) * effectiveRate);
+
+      if (amountBs <= 0) {
+        throw new Error('El monto de la Nota de Crédito debe ser mayor a cero.');
+      }
+
+      const payload = {
+        originalInvoiceNumber: manualNcNumber,
+        originalPrinterSerial: manualNcSerial || 'ACLAS-PP9',
+        originalInvoiceDate: manualNcDate,
+        port: settings?.fiscal_printer_port || 'USB',
+        model: settings?.fiscal_printer_model || 'ACLAS PP9 - PLUS',
+        client: {
+          name: 'CONSUMIDOR FINAL',
+          ci: 'V-00000000',
+          address: 'ARENALES, TORRES, LARA',
+          phone: ''
+        },
+        items: [
+          {
+            name: manualNcConcept || 'DEVOLUCION DE MEDICAMENTOS',
+            quantity: 1,
+            salePrice: amountBs,
+            taxPercentage: 0
+          }
+        ],
+        total: amountBs,
+        exchangeRate: effectiveRate,
+        isConvertedToVes: true,
+        reason: manualNcConcept || 'DEVOLUCION DE MERCANCIA'
+      };
+
+      const res = await fetch(`${LOCAL_BRIDGE}/api/fiscal/credit-note`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(35000)
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'La impresora fiscal rechazó el comando de Nota de Crédito.');
+      }
+
+      showToast(`✓ Nota de Crédito #${data.creditNoteNumber || manualNcNumber} emitida exitosamente en ACLAS PP9.`, 'success');
+      setShowManualNcModal(false);
+      setManualNcNumber('');
+      setManualNcAmountUsd('');
+      setManualNcAmountBs('');
+    } catch (err: any) {
+      showToast(`Error emitiendo Nota de Crédito manual: ${err.message}`, 'error');
+    } finally {
+      setIsSendingManualNc(false);
+    }
+  };
 
   const fetchFinancialReport = async (start = startDate, end = endDate) => {
     setLoading(true);
@@ -988,14 +1192,42 @@ export const ReportsView: React.FC<Props> = ({ settings }) => {
         </div>
       )}
 
-      {/* TAB 5: AUDITORÍA DE FACTURAS */}
+      {/* TAB 5: AUDITORÍA DE FACTURAS Y ANULACIONES SENIAT */}
       {activeTab === 'INVOICES' && (
-        <div className="bg-slate-900 rounded-2xl border border-slate-800 shadow-md overflow-hidden">
-          <div className="p-4 border-b border-slate-800 flex items-center justify-between">
-            <h4 className="font-bold text-white text-xs">Auditoría Completa de Facturación</h4>
-            <span className="text-xs text-slate-400 font-mono">
-              Total en ventas: ${totalRev.toFixed(2)} / Bs. {(totalRev * rate).toFixed(2)}
-            </span>
+        <div className="bg-slate-900 rounded-2xl border border-slate-800 shadow-md overflow-hidden space-y-0">
+          <div className="p-4 border-b border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-3 bg-slate-900/90">
+            <div>
+              <h4 className="font-bold text-white text-sm flex items-center gap-2">
+                <Receipt className="w-4 h-4 text-emerald-400" />
+                <span>Auditoría de Facturación y Anulaciones SENIAT</span>
+              </h4>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                Facturas emitidas, correlativos fiscales SENIAT y emisión directa de Notas de Crédito.
+              </p>
+            </div>
+
+            <div className="flex items-center flex-wrap gap-2">
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  value={invoiceSearch}
+                  onChange={e => setInvoiceSearch(e.target.value)}
+                  placeholder="Buscar comprobante, fiscal o cliente..."
+                  className="bg-slate-800/90 border border-slate-700 rounded-xl pl-9 pr-3 py-1.5 text-xs text-white placeholder-slate-400 focus:outline-none focus:border-emerald-500 w-52 sm:w-64"
+                />
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowManualNcModal(true)}
+                className="px-3 py-1.5 bg-rose-950/60 hover:bg-rose-900/80 border border-rose-800 text-rose-300 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm"
+                title="Emitir Nota de Crédito por número a la impresora fiscal"
+              >
+                <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                <span>NC Fiscal Libre</span>
+              </button>
+            </div>
           </div>
 
           <div className="overflow-x-auto">
@@ -1003,37 +1235,334 @@ export const ReportsView: React.FC<Props> = ({ settings }) => {
               <thead className="bg-slate-800/80 border-b border-slate-800 text-slate-300 text-[10px] uppercase font-bold tracking-wider">
                 <tr>
                   <th className="py-2.5 px-4">Comprobante</th>
+                  <th className="py-2.5 px-4">Nro. Fiscal SENIAT</th>
                   <th className="py-2.5 px-4">Fecha / Hora</th>
                   <th className="py-2.5 px-4">Cliente</th>
                   <th className="py-2.5 px-4">Cajero</th>
                   <th className="py-2.5 px-4">Método</th>
-                  <th className="py-2.5 px-4 text-right">IVA</th>
                   <th className="py-2.5 px-4 text-right">Total ($)</th>
+                  <th className="py-2.5 px-4 text-center">Estado</th>
+                  <th className="py-2.5 px-4 text-center">Acciones</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800">
-                {reportData?.invoices?.map((inv: any) => (
-                  <tr key={inv.id} className="hover:bg-slate-800/40 transition-colors">
-                    <td className="py-2.5 px-4 font-mono font-bold text-emerald-400">{inv.invoice_number}</td>
-                    <td className="py-2.5 px-4 text-slate-400">{new Date(inv.created_at).toLocaleString()}</td>
-                    <td className="py-2.5 px-4 font-semibold text-white">{inv.customer_name || 'Consumidor Final'}</td>
-                    <td className="py-2.5 px-4 text-slate-300">{inv.employee_name || 'Cajero'}</td>
-                    <td className="py-2.5 px-4">
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-[#0f172a] border border-slate-700 text-slate-300 uppercase">
-                        {inv.payment_method}
-                      </span>
-                    </td>
-                    <td className="py-2.5 px-4 text-right font-mono font-bold text-purple-400">
-                      {inv.tax > 0 ? `$${inv.tax.toFixed(2)}` : 'Exento'}
-                    </td>
-                    <td className="py-2.5 px-4 text-right font-mono font-black text-white">
-                      ${inv.total.toFixed(2)}
-                    </td>
-                  </tr>
-                ))}
+                {(() => {
+                  const invoices = reportData?.invoices || [];
+                  const filtered = invoices.filter((inv: any) => {
+                    if (!invoiceSearch.trim()) return true;
+                    const q = invoiceSearch.toLowerCase().trim();
+                    return (
+                      (inv.invoice_number && inv.invoice_number.toLowerCase().includes(q)) ||
+                      (inv.fiscal_invoice_number && inv.fiscal_invoice_number.toLowerCase().includes(q)) ||
+                      (inv.customer_name && inv.customer_name.toLowerCase().includes(q)) ||
+                      (inv.employee_name && inv.employee_name.toLowerCase().includes(q))
+                    );
+                  });
+
+                  if (filtered.length === 0) {
+                    return (
+                      <tr>
+                        <td colSpan={9} className="py-12 text-center text-slate-500 text-xs">
+                          No se encontraron facturas registradas en este período.
+                        </td>
+                      </tr>
+                    );
+                  }
+
+                  return filtered.map((inv: any) => {
+                    const isVoided = inv.status === 'VOIDED';
+                    return (
+                      <tr key={inv.id} className="hover:bg-slate-800/40 transition-colors">
+                        <td className="py-2.5 px-4 font-mono font-bold text-white">
+                          {inv.invoice_number}
+                        </td>
+                        <td className="py-2.5 px-4 font-mono">
+                          {inv.fiscal_invoice_number ? (
+                            <span className="text-blue-400 font-bold px-2 py-0.5 rounded bg-blue-950/60 border border-blue-800/60 text-[11px]">
+                              SENIAT #{inv.fiscal_invoice_number}
+                            </span>
+                          ) : (
+                            <span className="text-slate-500 text-[11px] italic">No fiscal / Pendiente</span>
+                          )}
+                        </td>
+                        <td className="py-2.5 px-4 text-slate-400 text-[11px] whitespace-nowrap">
+                          {new Date(inv.created_at).toLocaleString('es-VE')}
+                        </td>
+                        <td className="py-2.5 px-4 font-semibold text-white">
+                          {inv.customer_name || 'Consumidor Final'}
+                        </td>
+                        <td className="py-2.5 px-4 text-slate-300">{inv.employee_name || 'Cajero'}</td>
+                        <td className="py-2.5 px-4">
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-[#0f172a] border border-slate-700 text-slate-300 uppercase">
+                            {inv.payment_method}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-4 text-right font-mono font-black text-white">
+                          <div>${inv.total?.toFixed(2)}</div>
+                          <div className="text-[10px] text-slate-400">Bs. {(inv.total_bs || (inv.total * (inv.exchange_rate || rate))).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                        </td>
+                        <td className="py-2.5 px-4 text-center">
+                          {isVoided ? (
+                            <div className="inline-flex flex-col items-center">
+                              <span className="text-[10px] font-black px-2 py-0.5 rounded bg-rose-950/80 text-rose-300 border border-rose-800">
+                                ANULADA
+                              </span>
+                              {inv.credit_note_number && (
+                                <span className="text-[9px] font-mono text-rose-400 mt-0.5">
+                                  NC #{inv.credit_note_number}
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-[10px] font-black px-2 py-0.5 rounded bg-emerald-950/80 text-emerald-300 border border-emerald-800">
+                              COBRADA
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-2.5 px-4 text-center">
+                          {isVoided ? (
+                            <span className="text-[11px] text-slate-500 italic">Venta Reversada</span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenVoidModal(inv)}
+                              className="px-2.5 py-1 bg-rose-950/40 hover:bg-rose-900 border border-rose-700 text-rose-200 hover:text-white rounded-lg text-[11px] font-bold transition flex items-center gap-1 mx-auto cursor-pointer"
+                              title="Anular venta y emitir Nota de Crédito SENIAT"
+                            >
+                              <Trash2 className="w-3 h-3 text-rose-400" />
+                              <span>Anular & NC</span>
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  });
+                })()}
               </tbody>
             </table>
           </div>
+        </div>
+      )}
+
+      {/* MODAL PARA ANULAR VENTA Y EMITIR NOTA DE CRÉDITO */}
+      {saleToVoid && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-in fade-in overflow-y-auto">
+          <div className="bg-[#162032] border border-slate-800 rounded-3xl p-5 sm:p-6 w-full max-w-xl text-white shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-2.5">
+                <AlertTriangle className="w-6 h-6 text-rose-400" />
+                <div>
+                  <h3 className="text-lg font-black text-white">Anulación y Nota de Crédito SENIAT</h3>
+                  <p className="text-xs text-slate-400">Factura #{saleToVoid.invoice_number}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setSaleToVoid(null)}
+                className="p-1.5 text-slate-400 hover:text-white rounded-lg cursor-pointer transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-3.5 bg-slate-900/90 rounded-2xl border border-slate-800 space-y-1.5 text-xs">
+              <div className="flex justify-between">
+                <span className="text-slate-400">Cliente:</span>
+                <span className="font-semibold text-white">{saleToVoid.customer_name || 'Consumidor Final'} ({saleToVoid.customer_id_number || 'V-12345678'})</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-400">Fecha de Factura:</span>
+                <span className="font-mono text-slate-300">{new Date(saleToVoid.created_at).toLocaleString('es-VE')}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-400">Total a Revertir:</span>
+                <span className="font-mono font-bold text-emerald-400">${saleToVoid.total?.toFixed(2)} / Bs. {(saleToVoid.total_bs || (saleToVoid.total * (saleToVoid.exchange_rate || rate))).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="text-[11px] uppercase font-bold text-slate-300 block mb-1">
+                  Nro. Factura Fiscal Afectada (Verificar en ticket físico):
+                </label>
+                <input
+                  type="text"
+                  value={targetFiscalNumber}
+                  onChange={e => setTargetFiscalNumber(e.target.value)}
+                  placeholder="Ej: 00000003"
+                  className="w-full bg-[#0f172a] border border-slate-700 rounded-xl px-3 py-2 text-xs font-mono font-bold text-blue-400 focus:outline-none focus:border-blue-500"
+                />
+                <span className="text-[10px] text-slate-400 mt-0.5 block">
+                  Coloca los dígitos que salieron impresos en el encabezado del ticket fiscal.
+                </span>
+              </div>
+
+              <div>
+                <label className="text-[11px] uppercase font-bold text-slate-300 block mb-1">
+                  Motivo de Anulación:
+                </label>
+                <input
+                  type="text"
+                  value={voidReason}
+                  onChange={e => setVoidReason(e.target.value)}
+                  placeholder="Ej: Devolución de medicamentos, error en orden..."
+                  className="w-full bg-[#0f172a] border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-rose-500"
+                />
+              </div>
+
+              <div className="flex items-center gap-2 pt-1">
+                <input
+                  type="checkbox"
+                  id="chkFiscal"
+                  checked={transmitToFiscalPrinter}
+                  onChange={e => setTransmitToFiscalPrinter(e.target.checked)}
+                  className="w-4 h-4 rounded border-slate-700 text-emerald-500 focus:ring-emerald-400 bg-slate-900 cursor-pointer"
+                />
+                <label htmlFor="chkFiscal" className="text-xs text-slate-300 cursor-pointer">
+                  Transmitir Nota de Crédito oficial a la <strong>Impresora Fiscal ACLAS PP9 Plus</strong> (localhost:9095)
+                </label>
+              </div>
+
+              <div className="p-2.5 bg-amber-950/20 border border-amber-800/40 rounded-xl text-[11px] text-amber-200">
+                ⚠️ Al confirmar, el sistema restituirá automáticamente las cantidades vendidas a sus respectivos lotes de inventario y marcará la factura como ANULADA.
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setSaleToVoid(null)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={isVoidingSale}
+                onClick={handleExecuteVoidSale}
+                className="px-5 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-black transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-md shadow-rose-950/50"
+              >
+                {isVoidingSale ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                <span>{isVoidingSale ? 'Procesando Anulación...' : 'Confirmar Anulación y Emitir NC'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL PARA NOTA DE CRÉDITO FISCAL MANUAL (TICKET LIBRE) */}
+      {showManualNcModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-in fade-in overflow-y-auto">
+          <div className="bg-[#162032] border border-slate-800 rounded-3xl p-5 sm:p-6 w-full max-w-lg text-white shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-2.5">
+                <Receipt className="w-6 h-6 text-rose-400" />
+                <div>
+                  <h3 className="text-lg font-black text-white">Nota de Crédito Fiscal Manual</h3>
+                  <p className="text-xs text-slate-400">Emisión directa hacia la impresora ACLAS PP9 Plus</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowManualNcModal(false)}
+                className="p-1.5 text-slate-400 hover:text-white rounded-lg cursor-pointer transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="text-[11px] uppercase font-bold text-slate-300 block mb-1">
+                  Número de Factura Afectada (del ticket físico):
+                </label>
+                <input
+                  type="text"
+                  value={manualNcNumber}
+                  onChange={e => setManualNcNumber(e.target.value)}
+                  placeholder="Ej: 00000003"
+                  className="w-full bg-[#0f172a] border border-slate-700 rounded-xl px-3 py-2 text-xs font-mono font-bold text-emerald-400 focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[11px] uppercase font-bold text-slate-300 block mb-1">
+                    Monto en USD ($):
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={manualNcAmountUsd}
+                    onChange={e => {
+                      const v = e.target.value;
+                      setManualNcAmountUsd(v);
+                      const bs = ((parseFloat(v) || 0) * (settings?.exchange_rate || 889.58)).toFixed(2);
+                      setManualNcAmountBs(bs);
+                    }}
+                    placeholder="2.27"
+                    className="w-full bg-[#0f172a] border border-slate-700 rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] uppercase font-bold text-slate-300 block mb-1">
+                    Monto en Bolívares (Bs.):
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={manualNcAmountBs}
+                    onChange={e => setManualNcAmountBs(e.target.value)}
+                    placeholder="2019.35"
+                    className="w-full bg-[#0f172a] border border-slate-700 rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[11px] uppercase font-bold text-slate-300 block mb-1">
+                  Concepto / Medicamento devuelto:
+                </label>
+                <input
+                  type="text"
+                  value={manualNcConcept}
+                  onChange={e => setManualNcConcept(e.target.value)}
+                  placeholder="Ej: Devolución de Bromhexina"
+                  className="w-full bg-[#0f172a] border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setShowManualNcModal(false)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={isSendingManualNc || !manualNcNumber}
+                onClick={handleExecuteManualCreditNote}
+                className="px-5 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-black transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-md shadow-rose-950/50"
+              >
+                {isSendingManualNc ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Printer className="w-3.5 h-3.5" />}
+                <span>{isSendingManualNc ? 'Transmitiendo a Impresora...' : 'Emitir Nota de Crédito en Impresora'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TOAST FLOTANTE */}
+      {toastMessage && (
+        <div className={`fixed bottom-6 right-6 z-50 px-4 py-3 rounded-2xl shadow-2xl border text-xs font-bold flex items-center gap-2 animate-in slide-in-from-bottom ${
+          toastMessage.type === 'success' 
+            ? 'bg-emerald-950 border-emerald-500 text-emerald-200' 
+            : toastMessage.type === 'error'
+            ? 'bg-rose-950 border-rose-500 text-rose-200'
+            : 'bg-blue-950 border-blue-500 text-blue-200'
+        }`}>
+          <span>{toastMessage.text}</span>
         </div>
       )}
 

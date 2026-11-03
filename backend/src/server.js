@@ -3303,6 +3303,7 @@ app.get('/api/reports/financial', (req, res) => {
       SELECT 
         s.id, s.invoice_number, s.created_at, s.payment_method,
         s.subtotal, s.discount, s.tax, s.total, s.total_bs, s.exchange_rate,
+        s.status, s.fiscal_invoice_number, s.fiscal_serial, s.void_reason, s.credit_note_number, s.voided_at,
         c.name as customer_name, c.id_number as customer_id_number,
         e.name as employee_name
       FROM sales s
