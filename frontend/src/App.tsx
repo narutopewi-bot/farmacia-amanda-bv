@@ -618,8 +618,7 @@ export function App() {
                     onRefresh={fetchAllData}
                     onSaleComplete={(sale, printMode = 'fiscal') => {
                       fetchAllData();
-                      setReceiptAutoPrintMode(printMode);
-                      setCurrentSaleReceipt(sale);
+                      // Cobro directo sin ventana emergente: el POS procesa e imprime directo por la impresora fiscal
                     }}
                   />
                 )}

@@ -28,7 +28,9 @@ yarn-error.log*
 Thumbs.db
 *.db
 *.sqlite
-backend/farmacia.db
+*.db-wal
+*.db-shm
+!backend/farmacia.db
 
 # Environment & Local Secrets
 .env

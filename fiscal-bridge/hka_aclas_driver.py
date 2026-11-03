@@ -491,18 +491,18 @@ class HkaAclasDriver:
 
         if "CASHEA" in m:
             return "01"
-        if "USD" in c or "DIVISA" in m or "$" in m or "DLR" in m or "DOLAR" in m or "DOLARES" in m:
+        if "USD" in c or "DIVISA" in m or "$" in m or "DLR" in m or "DOLAR" in m or "DOLARES" in m or "CASH_USD" in m:
             return "03"
         if "MOVIL" in m or "PAGO MOVIL" in m or "PAGOMOVIL" in m:
             return "04"
-        if "PUNTO" in m or "DEBITO" in m or "TARJETA" in m or "POS" in m or "PUNTO DE VENTA" in m:
+        if "PUNTO" in m or "DEBITO" in m or "TARJETA" in m or "POS" in m or "PUNTO DE VENTA" in m or "CARD_BS" in m:
             return "05"
         if "CREDITO" in m or "T. CREDITO" in m or "T.CREDITO" in m:
             return "07"
         if "TRANSFERENCIA" in m or "TRANSF" in m:
             return "08"
-        # Predeterminado en Bolívares: 02 = EFECTIVO BS
-        return "02"
+        # Predeterminado en Efectivo: 01 = EFECTIVO
+        return "01"
 
     def print_invoice(self, payload):
         """
@@ -597,11 +597,13 @@ class HkaAclasDriver:
 
         # 4. Formas de Pago adaptadas a la tabla real de la impresora
         if not payments or len(payments) == 0:
-            # Pago total contado por defecto: 02 = EFECTIVO BS
-            ok, msg = self.send_cmd("102", wait_sec=0.3)
+            # Pago total contado por defecto: 01 = EFECTIVO
+            ok, msg = self.send_cmd("101", wait_sec=0.3)
+            if not ok:
+                ok, msg = self.send_cmd("102", wait_sec=0.3)
             if not ok:
                 self.cancel_document()
-                return {"success": False, "error": f"Error en pago directo Efectivo Bs: {msg}"}
+                return {"success": False, "error": f"Error en pago directo Efectivo: {msg}"}
         elif len(payments) == 1:
             # Un solo pago total: mapear al código correspondiente (101, 102, 103, 104, 105, etc.)
             p0 = payments[0]
@@ -628,8 +630,15 @@ class HkaAclasDriver:
                 pay_cmd = f"2{code}{amt_str}"
                 ok, msg = self.send_cmd(pay_cmd, wait_sec=0.2)
                 if not ok:
-                    self.cancel_document()
-                    return {"success": False, "error": f"Error registrando pago parcial '{p.get('method')}' (Medio {code}): {msg}"}
+                    # Fallback intento con medio 01 (Efectivo)
+                    pay_cmd_fb = f"201{amt_str}"
+                    ok_fb, msg_fb = self.send_cmd(pay_cmd_fb, wait_sec=0.2)
+                    if not ok_fb:
+                        # Fallback a cierre directo en efectivo 101 / 102
+                        ok_close, _ = self.send_cmd("101", wait_sec=0.4)
+                        if not ok_close:
+                            self.send_cmd("102", wait_sec=0.4)
+                        break
 
             # Verificar si el pago parcial completó o requiere cierre
             st_after = self.read_status()

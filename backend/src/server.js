@@ -274,6 +274,113 @@ app.post('/api/sales/:id/fiscal-confirm', (req, res) => {
     db.prepare('UPDATE sales SET fiscal_invoice_number = ?, fiscal_serial = ? WHERE id = ?')
       .run(fiscal_invoice_number, fiscal_serial || 'ACLAS-PP9', saleId);
     res.json({ success: true, fiscal_invoice_number, fiscal_serial });
+
+app.post('/api/sales/:id/credit-note-confirm', (req, res) => {
+  try {
+    const saleId = Number(req.params.id);
+    const { credit_note_number, credit_note_serial } = req.body;
+    db.prepare('UPDATE sales SET credit_note_number = ?, credit_note_serial = ? WHERE id = ?')
+      .run(credit_note_number, credit_note_serial || 'ACLAS-PP9', saleId);
+    res.json({ success: true, credit_note_number, credit_note_serial });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/sales/:id/void', (req, res) => {
+  try {
+    const saleId = Number(req.params.id);
+    const { reason, employeeId } = req.body;
+
+    const sale = db.prepare('SELECT * FROM sales WHERE id = ?').get(saleId);
+    if (!sale) return res.status(404).json({ error: 'Venta no encontrada' });
+    if (sale.status === 'VOIDED') return res.status(400).json({ error: 'Esta venta ya se encuentra anulada' });
+
+    const items = db.prepare(`
+      SELECT si.*, p.name as product_name, p.code as product_code
+      FROM sale_items si
+      JOIN products p ON si.product_id = p.id
+      WHERE si.sale_id = ?
+    `).all(saleId);
+
+    // 1. Reingresar mercancía al inventario (Lotes y Movimientos de Stock)
+    const updateBatchStock = db.prepare('UPDATE batches SET stock = stock + ? WHERE id = ?');
+    const insertStockMovement = db.prepare(`
+      INSERT INTO stock_movements (product_id, batch_id, movement_type, quantity, reason, reference_id, employee_id)
+      VALUES (?, ?, 'IN', ?, 'ANULACION_VENTA', ?, ?)
+    `);
+
+    for (const it of items) {
+      if (it.batch_id) {
+        updateBatchStock.run(it.quantity, it.batch_id);
+      }
+      insertStockMovement.run(
+        it.product_id,
+        it.batch_id || null,
+        it.quantity,
+        `Anulación de Venta #${sale.invoice_number || saleId}: ${reason || 'Devolución de cliente'}`,
+        sale.invoice_number || `FAC-${saleId}`,
+        employeeId || sale.employee_id || 1
+      );
+    }
+
+    // 2. Si la venta fue a crédito, rebajar la deuda del cliente
+    if (sale.is_credit === 1 && sale.customer_id) {
+      db.prepare('UPDATE customers SET current_debt = MAX(0, current_debt - ?) WHERE id = ?')
+        .run(sale.total, sale.customer_id);
+    }
+
+    // 3. Si estuvo asociada a una caja abierta, registrar movimiento de egreso
+    if (sale.cash_register_id) {
+      try {
+        const activeReg = db.prepare('SELECT * FROM cash_registers WHERE id = ? AND status = "OPEN"').get(sale.cash_register_id);
+        if (activeReg) {
+          db.prepare(`
+            INSERT INTO cash_movements (cash_register_id, type, amount, reason, employee_id)
+            VALUES (?, 'EXPENSE', ?, ?, ?)
+          `).run(
+            sale.cash_register_id,
+            sale.total,
+            `Anulación de Venta #${sale.invoice_number || saleId}`,
+            employeeId || sale.employee_id || 1
+          );
+        }
+      } catch (e) {}
+    }
+
+    // 4. Marcar la venta como anulada
+    const nowIso = new Date().toISOString();
+    db.prepare(`
+      UPDATE sales 
+      SET status = 'VOIDED', 
+          void_reason = ?, 
+          voided_at = ?
+      WHERE id = ?
+    `).run(reason || 'Devolución de cliente', nowIso, saleId);
+
+    // 5. Devolver datos completos para emisión de Nota de Crédito fiscal
+    const customer = sale.customer_id ? db.prepare('SELECT * FROM customers WHERE id = ?').get(sale.customer_id) : null;
+    
+    sale.status = 'VOIDED';
+    sale.void_reason = reason || 'Devolución de cliente';
+    sale.voided_at = nowIso;
+    sale.items = items;
+    sale.customer_name = customer?.name || 'CONSUMIDOR FINAL';
+    sale.customer_id_number = customer?.id_number || 'V-00000000';
+
+    io.emit('sale_voided', { saleId, invoiceNumber: sale.invoice_number });
+
+    res.json({
+      success: true,
+      message: `Venta #${sale.invoice_number || saleId} anulada con éxito y mercancía devuelta al inventario.`,
+      sale
+    });
+  } catch (err) {
+    console.error('Error voiding sale:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

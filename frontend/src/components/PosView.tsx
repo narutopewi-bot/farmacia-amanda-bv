@@ -166,7 +166,121 @@ export const PosView: React.FC<PosViewProps> = ({
   const [changeCurrency, setChangeCurrency] = useState<'USD' | 'BS'>('USD');
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState<boolean>(false);
   const [showMobileCart, setShowMobileCart] = useState<boolean>(false);
-  const [showProductImages, setShowProductImages] = useState<boolean>(false);
+  const [showProductImages, setShowProductImages] = useState<boolean>(true);
+
+  // Historial de Ventas y Anulaciones (Notas de Crédito SENIAT)
+  const [showSalesHistoryModal, setShowSalesHistoryModal] = useState<boolean>(false);
+  const [recentSalesList, setRecentSalesList] = useState<any[]>([]);
+  const [isLoadingSalesHistory, setIsLoadingSalesHistory] = useState<boolean>(false);
+  const [saleToVoid, setSaleToVoid] = useState<any | null>(null);
+  const [voidReason, setVoidReason] = useState<string>('Devolución de mercancía');
+  const [isVoidingSale, setIsVoidingSale] = useState<boolean>(false);
+
+  const fetchRecentSales = async () => {
+    setIsLoadingSalesHistory(true);
+    try {
+      const res = await fetch('/api/sales');
+      if (res.ok) {
+        const data = await res.json();
+        setRecentSalesList(data);
+      }
+    } catch (err) {
+      console.warn('Error fetching sales history:', err);
+    } finally {
+      setIsLoadingSalesHistory(false);
+    }
+  };
+
+  const handleOpenSalesHistory = () => {
+    fetchRecentSales();
+    setShowSalesHistoryModal(true);
+  };
+
+  const handleExecuteVoidSale = async (sale: any) => {
+    if (!sale) return;
+    setIsVoidingSale(true);
+    try {
+      // 1. Llamar al backend para anular la venta y reponer inventario
+      const res = await fetch(`/api/sales/${sale.id}/void`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          reason: voidReason || 'Devolución de mercancía',
+          employeeId: employees[0]?.id || 1
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Error al anular la venta');
+
+      const voidedSale = data.sale;
+
+      // 2. Transmitir Nota de Crédito a la impresora fiscal física en localhost:9095
+      try {
+        const LOCAL_BRIDGE = 'http://127.0.0.1:9095';
+        const effectiveRate = Number(voidedSale.exchange_rate || rate || 889.58);
+        const printerPort = settings?.fiscal_printer_port || 'USB';
+
+        const creditPayload = {
+          originalInvoiceNumber: voidedSale.fiscal_invoice_number || voidedSale.invoice_number,
+          originalPrinterSerial: voidedSale.fiscal_serial || 'ACLAS-PP9',
+          originalInvoiceDate: voidedSale.created_at,
+          port: printerPort,
+          model: settings?.fiscal_printer_model || 'ACLAS PP9 - PLUS',
+          client: {
+            name: voidedSale.customer_name || 'CONSUMIDOR FINAL',
+            ci: voidedSale.customer_id_number || 'V-00000000',
+            address: 'ARENALES, TORRES, LARA',
+            phone: ''
+          },
+          items: (voidedSale.items || []).map((it: any) => ({
+            name: it.product_name || 'MEDICAMENTO',
+            quantity: Number(it.quantity) || 1,
+            salePrice: Number(it.unit_price || 0) * effectiveRate,
+            taxPercentage: 0
+          })),
+          total: Number(voidedSale.total || 0) * effectiveRate,
+          exchangeRate: effectiveRate,
+          isConvertedToVes: true,
+          reason: voidReason || 'DEVOLUCION DE MERCANCIA'
+        };
+
+        const ncRes = await fetch(`${LOCAL_BRIDGE}/api/fiscal/credit-note`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(creditPayload),
+          signal: AbortSignal.timeout(35000)
+        });
+
+        const ncData = await ncRes.json();
+        if (ncRes.ok && ncData.success) {
+          const ncNum = ncData.creditNoteNumber || ncData.fiscalInvoiceNumber || '';
+          const ncSerial = ncData.printerSerial || 'ACLAS-PP9';
+          await fetch(`/api/sales/${sale.id}/credit-note-confirm`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              credit_note_number: ncNum,
+              credit_note_serial: ncSerial
+            })
+          }).catch(console.warn);
+
+          showPosNotification(`✓ Nota de Crédito #${ncNum} emitida en ACLAS PP9-PLUS y mercancía devuelta al inventario`, 'success');
+        } else {
+          showPosNotification(`Venta anulada en sistema. Aviso impresora: ${ncData.error || 'Verifique el puente fiscal'}`, 'error');
+        }
+      } catch (fErr: any) {
+        showPosNotification(`Venta anulada en inventario. No se pudo conectar al puente fiscal (localhost:9095)`, 'error');
+      }
+
+      setSaleToVoid(null);
+      fetchRecentSales();
+      if (onRefresh) onRefresh();
+    } catch (err: any) {
+      showPosNotification(`Error al anular venta: ${err.message}`, 'error');
+    } finally {
+      setIsVoidingSale(false);
+    }
+  };
 
   const rate = settings?.exchange_rate || 85.0;
 
@@ -1132,6 +1246,20 @@ export const PosView: React.FC<PosViewProps> = ({
                   ? `Puerto: ${fiscalBridgeStatus.info?.assignedPort || 'USB'} • localhost:9095`
                   : 'Puente cerrado (clic para ayuda)'}
               </div>
+            </div>
+          </button>
+
+          {/* BOTÓN HISTORIAL DE VENTAS Y ANULACIONES / NOTAS DE CRÉDITO */}
+          <button
+            type="button"
+            onClick={handleOpenSalesHistory}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-2xl border border-slate-700 bg-[#162032] hover:bg-[#1e293b] hover:border-slate-600 text-slate-200 transition cursor-pointer shadow-sm text-left"
+            title="Ver historial de ventas y emitir Notas de Crédito / Anulaciones SENIAT"
+          >
+            <Receipt className="w-4 h-4 text-emerald-400 shrink-0" />
+            <div>
+              <span className="text-xs font-black text-white block leading-none">Ventas & Anulaciones</span>
+              <span className="text-[10px] text-slate-400 font-medium">Notas de Crédito</span>
             </div>
           </button>
         </div>
@@ -2539,6 +2667,167 @@ export const PosView: React.FC<PosViewProps> = ({
       )}
 
       {/* ========================================================================= */}
+      {/* ========================================================================= */}
+      {/* MODAL: HISTORIAL DE VENTAS Y ANULACIONES (NOTAS DE CRÉDITO SENIAT)         */}
+      {/* ========================================================================= */}
+      {showSalesHistoryModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-in fade-in overflow-y-auto">
+          <div className="bg-[#162032] border border-slate-800 rounded-3xl p-5 sm:p-6 w-full max-w-4xl text-white shadow-2xl space-y-4 max-h-[92vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-2.5">
+                <Receipt className="w-6 h-6 text-emerald-400" />
+                <div>
+                  <h3 className="text-lg font-black text-white">Historial de Ventas y Anulaciones SENIAT</h3>
+                  <p className="text-xs text-slate-400">Emisión de Notas de Crédito fiscales y restitución de inventario</p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setShowSalesHistoryModal(false);
+                  setSaleToVoid(null);
+                }}
+                className="p-1.5 text-slate-400 hover:text-white rounded-lg cursor-pointer transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Sub-panel si se seleccionó una venta para anular */}
+            {saleToVoid && (
+              <div className="p-4 bg-rose-950/30 border border-rose-800/80 rounded-2xl space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-rose-300 font-bold text-sm">
+                    <AlertTriangle className="w-5 h-5 text-rose-400" />
+                    <span>Confirmar Anulación de Factura #{saleToVoid.invoice_number || saleToVoid.id}</span>
+                  </div>
+                  <button
+                    onClick={() => setSaleToVoid(null)}
+                    className="text-xs text-slate-400 hover:text-white underline cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+                <div className="text-xs text-slate-300 space-y-1">
+                  <p><strong>Cliente:</strong> {saleToVoid.customer_name || 'CONSUMIDOR FINAL'} ({saleToVoid.customer_id_number || 'V-00000000'})</p>
+                  <p><strong>Total Factura:</strong> ${saleToVoid.total?.toFixed(2)} / Bs. {(saleToVoid.total_bs || (saleToVoid.total * rate)).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                  <p><strong>Factura Fiscal Afectada:</strong> {saleToVoid.fiscal_invoice_number || 'Provisional'}</p>
+                </div>
+                <div>
+                  <label className="text-[11px] uppercase font-bold text-slate-300 block mb-1">Motivo de Anulación / Devolución:</label>
+                  <input
+                    type="text"
+                    value={voidReason}
+                    onChange={e => setVoidReason(e.target.value)}
+                    placeholder="Ej: Devolución de cliente, error de digitación..."
+                    className="w-full bg-[#0f172a] border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-rose-500"
+                  />
+                </div>
+                <div className="p-2.5 bg-slate-900/80 rounded-xl border border-slate-800 text-[11px] text-slate-400">
+                  ⚠️ Al anular esta venta, el sistema repondrá automáticamente el stock de los medicamentos al inventario y transmitirá la <strong>Nota de Crédito oficial</strong> a la impresora fiscal ACLAS PP9 Plus en el puerto USB.
+                </div>
+                <div className="flex justify-end gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setSaleToVoid(null)}
+                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition cursor-pointer"
+                  >
+                    Regresar
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isVoidingSale}
+                    onClick={() => handleExecuteVoidSale(saleToVoid)}
+                    className="px-5 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-black transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-md shadow-rose-950/50"
+                  >
+                    {isVoidingSale ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                    <span>{isVoidingSale ? 'Emitiendo Nota de Crédito...' : 'Confirmar Anulación y Emitir Nota de Crédito'}</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Listado de Ventas Recientes */}
+            <div className="overflow-x-auto">
+              {isLoadingSalesHistory ? (
+                <div className="py-12 text-center text-slate-400 text-xs">Cargando ventas recientes...</div>
+              ) : recentSalesList.length === 0 ? (
+                <div className="py-12 text-center text-slate-500 text-xs">No hay ventas registradas en el sistema.</div>
+              ) : (
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-[#0f172a] text-slate-400 uppercase text-[10px] font-bold border-b border-slate-800">
+                    <tr>
+                      <th className="py-2.5 px-3">Comprobante</th>
+                      <th className="py-2.5 px-3">Fecha</th>
+                      <th className="py-2.5 px-3">Cliente</th>
+                      <th className="py-2.5 px-3 text-right">Total ($)</th>
+                      <th className="py-2.5 px-3 text-right">Total (Bs.)</th>
+                      <th className="py-2.5 px-3 text-center">Estado</th>
+                      <th className="py-2.5 px-3 text-center">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/80">
+                    {recentSalesList.map(s => {
+                      const isVoided = s.status === 'VOIDED';
+                      return (
+                        <tr key={s.id} className="hover:bg-slate-800/40 transition">
+                          <td className="py-2.5 px-3 font-mono font-bold text-white">
+                            <div>{s.invoice_number || `FAC-${s.id}`}</div>
+                            {s.fiscal_invoice_number && (
+                              <span className="text-[10px] text-blue-400 font-mono block">
+                                SENIAT: {s.fiscal_invoice_number}
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-2.5 px-3 text-slate-400 text-[11px] whitespace-nowrap">
+                            {new Date(s.created_at).toLocaleString('es-VE')}
+                          </td>
+                          <td className="py-2.5 px-3 text-slate-300 font-medium">
+                            {s.customer_name || 'CONSUMIDOR FINAL'}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-mono font-bold text-emerald-400">
+                            ${s.total?.toFixed(2)}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-mono text-slate-300 text-[11px]">
+                            Bs. {(s.total_bs || (s.total * rate)).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </td>
+                          <td className="py-2.5 px-3 text-center">
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase border ${
+                              isVoided 
+                                ? 'bg-rose-500/20 text-rose-300 border-rose-500/40' 
+                                : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                            }`}>
+                              {isVoided ? 'ANULADA' : 'PAGADA'}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 text-center">
+                            {isVoided ? (
+                              <span className="text-[10px] text-slate-500 italic">
+                                {s.credit_note_number ? `NC: ${s.credit_note_number}` : 'Nota de Crédito'}
+                              </span>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSaleToVoid(s);
+                                  setVoidReason('Devolución de mercancía');
+                                }}
+                                className="px-2.5 py-1 bg-rose-600/20 hover:bg-rose-600 text-rose-300 hover:text-white rounded-lg text-[10px] font-bold border border-rose-500/40 transition cursor-pointer"
+                              >
+                                Anular Venta
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 9. MODAL: COMPROBANTE TÉRMICO 80MM DE CIERRE / ARQUEO Z                   */}
       {/* ========================================================================= */}
       {showPosTicketModal && cajaTicket && (

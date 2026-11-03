@@ -314,6 +314,11 @@ export function initDatabase() {
 
   try { db.exec("ALTER TABLE sales ADD COLUMN fiscal_invoice_number TEXT"); } catch(e){}
   try { db.exec("ALTER TABLE sales ADD COLUMN fiscal_serial TEXT"); } catch(e){}
+  try { db.exec("ALTER TABLE sales ADD COLUMN status TEXT DEFAULT 'PAID'"); } catch(e){}
+  try { db.exec("ALTER TABLE sales ADD COLUMN void_reason TEXT"); } catch(e){}
+  try { db.exec("ALTER TABLE sales ADD COLUMN credit_note_number TEXT"); } catch(e){}
+  try { db.exec("ALTER TABLE sales ADD COLUMN credit_note_serial TEXT"); } catch(e){}
+  try { db.exec("ALTER TABLE sales ADD COLUMN voided_at DATETIME"); } catch(e){}
 
   // Products IVA and profit margin columns migration
   try { db.exec("ALTER TABLE products ADD COLUMN has_iva INTEGER DEFAULT 0"); } catch(e){}
@@ -401,16 +406,36 @@ export function initDatabase() {
 
   seedInitialData();
 
-  // Comprobación y limpieza automática de datos de prueba existentes
+  // Auto-seed maestro si la base de datos está vacía o tiene menos de 50 productos
   try {
-    const hasMock = db.prepare("SELECT count(*) as count FROM products WHERE code IN ('7591001001', '01010')").get()?.count > 0;
-    const hasOldSales = db.prepare("SELECT count(*) as count FROM sales").get()?.count > 0;
-    const hasOldOrders = db.prepare("SELECT count(*) as count FROM online_orders WHERE order_number = 'ORD-1001'").get()?.count > 0;
-    if (hasMock || hasOldSales || hasOldOrders) {
-      clearTestData();
+    const pCount = db.prepare('SELECT count(*) as count FROM products').get()?.count || 0;
+    if (pCount < 50) {
+      const catalogPath = path.join(__dirname, 'initial_catalog.json');
+      if (fs.existsSync(catalogPath)) {
+        console.log('[DATABASE] Sembrando catálogo maestro de 1887 productos...');
+        const catalog = JSON.parse(fs.readFileSync(catalogPath, 'utf8'));
+        const insertP = db.prepare(`
+          INSERT OR IGNORE INTO products (id, code, name, generic_name, category, presentation, laboratory, prescription_required, cost_price, selling_price, min_stock, image_url, description, warehouse_location, has_iva, iva_percent, profit_margin)
+          VALUES (@id, @code, @name, @generic_name, @category, @presentation, @laboratory, @prescription_required, @cost_price, @selling_price, @min_stock, @image_url, @description, @warehouse_location, @has_iva, @iva_percent, @profit_margin)
+        `);
+        const insertB = db.prepare(`
+          INSERT OR IGNORE INTO batches (id, product_id, batch_number, expiry_date, stock, initial_stock, cost_price)
+          VALUES (@id, @product_id, @batch_number, @expiry_date, @stock, @initial_stock, @cost_price)
+        `);
+
+        db.transaction(() => {
+          for (const p of catalog.products || []) {
+            try { insertP.run(p); } catch(e){}
+          }
+          for (const b of catalog.batches || []) {
+            try { insertB.run(b); } catch(e){}
+          }
+        })();
+        console.log('[DATABASE] Catálogo maestro sembrado con éxito.');
+      }
     }
-  } catch (e) {
-    console.error('[DATABASE] Error comprobando datos de prueba:', e);
+  } catch(e) {
+    console.error('[DATABASE] Error sembrando catálogo:', e);
   }
 }
 

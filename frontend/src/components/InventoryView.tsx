@@ -413,11 +413,12 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ products, categori
 
   const filtered = useMemo(() => {
     return products.filter(p => {
+      const q = (search || '').toLowerCase();
       const matchSearch = 
-        p.name.toLowerCase().includes(search.toLowerCase()) ||
-        p.generic_name.toLowerCase().includes(search.toLowerCase()) ||
-        p.code.toLowerCase().includes(search.toLowerCase()) ||
-        p.laboratory.toLowerCase().includes(search.toLowerCase());
+        (p.name || '').toLowerCase().includes(q) ||
+        (p.generic_name || '').toLowerCase().includes(q) ||
+        (p.code || '').toLowerCase().includes(q) ||
+        (p.laboratory || '').toLowerCase().includes(q);
 
       const matchCat = categoryFilter === 'ALL' || p.category === categoryFilter;
 
