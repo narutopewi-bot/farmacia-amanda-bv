@@ -138,33 +138,15 @@ export async function executeFiscalInvoice(sale, items, customer = {}) {
       }
     }
   } catch (bridgeErr) {
-    console.warn(`[FISCAL BRIDGE] Aviso: No se pudo conectar al puente hardware (${bridgeErr.message}). Registrando correlativo de respaldo...`);
+    console.warn(`[FISCAL BRIDGE] Aviso en servidor: El hardware fiscal no reside en la nube (${bridgeErr.message}).`);
   }
 
-  // 2. Modo Respaldo / Transaccional (Si el puente local no está activo en este momento)
-  const lastFiscalSale = db.prepare("SELECT fiscal_invoice_number FROM sales WHERE fiscal_invoice_number IS NOT NULL ORDER BY id DESC LIMIT 1").get();
-  let nextNumber = 1;
-  if (lastFiscalSale && lastFiscalSale.fiscal_invoice_number) {
-    const parts = lastFiscalSale.fiscal_invoice_number.split('-');
-    const lastNum = parseInt(parts[parts.length - 1], 10);
-    if (!isNaN(lastNum)) nextNumber = lastNum + 1;
-  }
-  
-  const fiscalInvoiceNumber = `FAC-SENIAT-${String(nextNumber).padStart(8, '0')}`;
-  const fiscalSerial = settings.fiscal_serial || 'Z4A0001234';
-
-  const logEntry = `\n--- [${new Date().toISOString()}] REGISTRO FISCAL (Venta #${sale.id || sale.invoice_number}) ---\n` +
-    `Correlativo: ${fiscalInvoiceNumber} | Serial: ${fiscalSerial}\n` +
-    `Total Bs: ${totalBs.toFixed(2)} | Tasa: ${rate}\n`;
-  try { fs.appendFileSync(logPath, logEntry); } catch(e){}
-
+  // Si el servidor de la nube no tiene la impresora física conectada a su puerto local,
+  // no inventar correlativos falsos; delegar la emisión al cliente web en http://127.0.0.1:9095
   return {
-    success: true,
-    fiscal_mode: true,
-    fiscal_invoice_number: fiscalInvoiceNumber,
-    fiscal_serial: fiscalSerial,
-    port: settings.fiscal_printer_port || 'USB',
-    message: `Factura Fiscal ${fiscalInvoiceNumber} registrada en cola.`
+    success: false,
+    fiscal_mode: false,
+    error: 'Impresora fiscal física conectada en terminal local del cliente. Emisión delegada al navegador (http://127.0.0.1:9095).'
   };
 }
 

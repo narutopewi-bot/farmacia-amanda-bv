@@ -877,168 +877,82 @@ export const PosView: React.FC<PosViewProps> = ({
 
       let fullSale = await (await fetch(`/api/sales/${data.saleId}`)).json();
 
-      // Si se seleccionó emisión fiscal, enviar directo al puente fiscal local
-      if (printMode === 'fiscal') {
-        try {
-          const fiscalRes = await fetch(`/api/fiscal/print-sale/${data.saleId}`, { method: 'POST' });
-          const fiscalData = await fiscalRes.json();
-          if (fiscalData.success && fiscalData.fiscal_invoice_number) {
-            fullSale.fiscal_invoice_number = fiscalData.fiscal_invoice_number;
-            fullSale.fiscal_serial = fiscalData.fiscal_serial;
-            showPosNotification(`✓ Factura Fiscal #${fiscalData.fiscal_invoice_number} emitida en ACLAS PP9-PLUS`, 'success');
-          } else if (fiscalData.error) {
-            showPosNotification(`⚠️ Venta guardada pero aviso fiscal: ${fiscalData.error}`, 'error');
-          }
-        } catch (fErr: any) {
-          console.warn('Error emitiendo factura fiscal:', fErr);
-          showPosNotification('Venta guardada. No se pudo conectar al puente fiscal (localhost:9095)', 'error');
-        }
-      }
+      // Transmisión directa a la impresora fiscal física en el puerto local 9095
+      try {
+        const LOCAL_BRIDGE = 'http://127.0.0.1:9095';
+        const effectiveRate = Number(fullSale.exchange_rate || rate || 889.58);
+        const printerPort = settings?.fiscal_printer_port || 'USB';
 
-      setIsPaymentModalOpen(false);
-      clearCart();
-      fetchCajasPos();
-      onSaleComplete(fullSale, printMode);
-    } catch (err: any) {
-      setErrorMsg(err.message);
-    } finally {
-      setIsProcessing(false);
-    }
-  };
+        const fiscalPayload = {
+          receiptNumber: fullSale.invoice_number || fullSale.id,
+          saleId: fullSale.id,
+          port: printerPort,
+          model: settings?.fiscal_printer_model || 'ACLAS PP9 - PLUS',
+          client: {
+            name: selectedCustomer?.name || 'CONSUMIDOR FINAL',
+            ci: selectedCustomer?.id_number || 'V-00000000',
+            address: 'ARENALES, TORRES, LARA',
+            phone: ''
+          },
+          items: (fullSale.items || []).map((item: any) => ({
+            name: item.product_name || 'MEDICAMENTO',
+            quantity: Number(item.quantity) || 1,
+            salePrice: Number(item.unit_price || 0) * effectiveRate,
+            taxPercentage: 0
+          })),
+          total: Number(fullSale.total || 0) * effectiveRate,
+          exchangeRate: effectiveRate,
+          isConvertedToVes: true,
+          payments: paymentsToSave.map((p: any) => ({
+            method: p.payment_method || 'EFECTIVO',
+            amount: p.currency === 'USD' ? Number(p.amount) * effectiveRate : Number(p.amount),
+            currency: 'VES'
+          }))
+        };
 
-  // Cobro Rápido con Ticket Térmico 80mm [Tecla + o NumpadAdd]
-  const handleQuickThermalCheckout = async () => {
-    if (cart.length === 0 || isProcessing) return;
-
-    if (!currentActiveCaja) {
-      showPosNotification('⚠️ Para facturar debe abrir o tener una caja activa en este terminal.', 'error');
-      handleOpenPosAbrir();
-      return;
-    }
-
-    setIsProcessing(true);
-    setErrorMsg('');
-
-    try {
-      const paymentsToSave: SalePayment[] = [];
-      if (numPayCashUsd > 0 || numPayCashBs > 0 || numPayPagoMovilBs > 0 || numPayCardBs > 0 || numPayZelleUsd > 0 || numPayCreditUsd > 0) {
-        if (numPayCashUsd > 0) paymentsToSave.push({ payment_method: 'CASH_USD', currency: 'USD', amount: numPayCashUsd, amount_usd: numPayCashUsd, amount_bs: numPayCashUsd * rate, reference: '' });
-        if (numPayZelleUsd > 0) paymentsToSave.push({ payment_method: 'ZELLE_USD', currency: 'USD', amount: numPayZelleUsd, amount_usd: numPayZelleUsd, amount_bs: numPayZelleUsd * rate, reference: refZelle });
-        if (numPayPagoMovilBs > 0) paymentsToSave.push({ payment_method: 'PAGO_MOVIL', currency: 'BS', amount: numPayPagoMovilBs, amount_usd: eqPagoMovilUsd, amount_bs: numPayPagoMovilBs, reference: refPagoMovil });
-        if (numPayCardBs > 0) paymentsToSave.push({ payment_method: 'CARD_BS', currency: 'BS', amount: numPayCardBs, amount_usd: eqCardUsd, amount_bs: numPayCardBs, reference: refCard });
-        if (numPayCashBs > 0) paymentsToSave.push({ payment_method: 'CASH_BS', currency: 'BS', amount: numPayCashBs, amount_usd: eqCashBsUsd, amount_bs: numPayCashBs, reference: '' });
-        if (numPayCreditUsd > 0) paymentsToSave.push({ payment_method: 'CREDIT', currency: 'USD', amount: numPayCreditUsd, amount_usd: numPayCreditUsd, amount_bs: numPayCreditUsd * rate, reference: `Plazo: ${creditDays} días` });
-      } else {
-        paymentsToSave.push({
-          payment_method: 'CASH_USD',
-          currency: 'USD',
-          amount: Number(totalUsd.toFixed(2)),
-          amount_usd: Number(totalUsd.toFixed(2)),
-          amount_bs: Number(totalBs.toFixed(2)),
-          reference: 'Cobro Rápido Térmico (+)'
+        const fiscalRes = await fetch(`${LOCAL_BRIDGE}/api/fiscal/invoice`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(fiscalPayload),
+          signal: AbortSignal.timeout(35000)
         });
+
+        const fiscalData = await fiscalRes.json();
+        if (fiscalRes.ok && fiscalData.success) {
+          const fNum = fiscalData.fiscalInvoiceNumber || '';
+          const fSer = fiscalData.printerSerial || 'ACLAS-PP9';
+          fullSale.fiscal_invoice_number = fNum;
+          fullSale.fiscal_serial = fSer;
+
+          // Guardar correlativo real en servidor
+          await fetch(`/api/sales/${data.saleId}/fiscal-confirm`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              fiscal_invoice_number: fNum,
+              fiscal_serial: fSer
+            })
+          }).catch(console.warn);
+
+          showPosNotification(`✓ Factura Fiscal #${fNum} emitida en ACLAS PP9-PLUS`, 'success');
+        } else {
+          showPosNotification(`⚠️ Venta guardada pero aviso fiscal: ${fiscalData.error || 'Error en impresora'}`, 'error');
+        }
+      } catch (fErr: any) {
+        console.warn('Error emitiendo factura fiscal local:', fErr);
+        showPosNotification('Venta guardada. No se pudo conectar a la impresora fiscal local (localhost:9095)', 'error');
       }
-
-      const payload = {
-        cash_register_id: currentActiveCaja?.id || null,
-        customer_id: selectedCustomerId,
-        employee_id: selectedEmployeeId,
-        sale_type: 'CONTADO',
-        payment_method: paymentsToSave[0].payment_method,
-        discount: numDiscount,
-        tax: Number(taxUsd.toFixed(2)),
-        exchange_rate: rate,
-        change_currency: changeCurrency,
-        change_amount: changeCurrency === 'USD' ? changeUsd : changeBs,
-        payments: paymentsToSave,
-        items: cart.map(i => ({
-          product_id: i.product.id,
-          unit_price: i.product.selling_price,
-          quantity: i.quantity
-        }))
-      };
-
-      const res = await fetch('/api/sales', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Error al procesar la venta');
-
-      const saleRes = await fetch(`/api/sales/${data.saleId}`);
-      const fullSale = await saleRes.json();
 
       setIsPaymentModalOpen(false);
       clearCart();
       fetchCajasPos();
-      showPosNotification('✓ Venta procesada con Ticket Térmico 80mm [Tecla +]', 'success');
-      onSaleComplete(fullSale, 'thermal');
+      onSaleComplete(fullSale, 'fiscal');
     } catch (err: any) {
       setErrorMsg(err.message);
-      showPosNotification(err.message, 'error');
     } finally {
       setIsProcessing(false);
     }
   };
-
-  // Atajo global de teclado: Tecla '+' para Cobro Rápido en Térmica (tal como en Guardián)
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== '+' && e.code !== 'NumpadAdd') return;
-
-      const target = e.target as HTMLElement;
-      if (
-        target &&
-        (target.tagName === 'INPUT' ||
-          target.tagName === 'TEXTAREA' ||
-          target.tagName === 'SELECT' ||
-          target.isContentEditable ||
-          target.closest('input') ||
-          target.closest('textarea') ||
-          target.closest('select'))
-      ) {
-        return;
-      }
-
-      if (cart.length === 0 || !currentActiveCaja || isProcessing) {
-        return;
-      }
-
-      e.preventDefault();
-      e.stopPropagation();
-
-      handleQuickThermalCheckout();
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [
-    cart,
-    currentActiveCaja,
-    isProcessing,
-    totalUsd,
-    totalBs,
-    rate,
-    selectedCustomerId,
-    selectedEmployeeId,
-    numDiscount,
-    taxUsd,
-    changeCurrency,
-    changeUsd,
-    changeBs,
-    numPayCashUsd,
-    numPayCashBs,
-    numPayPagoMovilBs,
-    numPayCardBs,
-    numPayZelleUsd,
-    numPayCreditUsd,
-    refZelle,
-    refPagoMovil,
-    refCard,
-    creditDays
-  ]);
 
   const handleSaveRate = async () => {
     const newR = Number(tempRate);
@@ -2026,7 +1940,7 @@ export const PosView: React.FC<PosViewProps> = ({
               <button
                 type="button"
                 disabled={isProcessing || diffUsd > 0.009}
-                onClick={() => handleExecuteCheckout(settings?.fiscal_printer_enabled === 1 ? 'fiscal' : 'thermal')}
+                onClick={() => handleExecuteCheckout('fiscal')}
                 className="flex-1 py-3.5 px-6 bg-emerald-600 hover:bg-emerald-500 active:scale-[0.99] text-white font-black text-sm rounded-xl transition shadow-xl shadow-emerald-950/60 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 title="Completar y registrar el cobro"
               >

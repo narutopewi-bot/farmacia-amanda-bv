@@ -137,7 +137,7 @@ else:
     print("[ERROR] No se encontró dtpdfiscal64.dll en el directorio.")
 
 CONFIG_FILE = os.path.join(BASE_DIR, "config.json")
-CONFIG = {"connection_mode": "USB", "printerModel": "DEVTECH DTP-80i", "port": "COM1", "baudRate": 9600}
+CONFIG = {"connection_mode": "USB", "printerModel": "ACLAS PP9 - PLUS", "port": "USB", "baudRate": 9600}
 
 if os.path.exists(CONFIG_FILE):
     try:
@@ -169,7 +169,7 @@ def is_aclas_mode():
     return "ACLAS" in model or "PP9" in model or "HKA" in model
 
 def get_aclas_driver():
-    port = CONFIG.get("port", "COM99")
+    port = CONFIG.get("port", "USB")
     baud = int(CONFIG.get("baudRate", 9600))
     return HkaAclasDriver(port=port, baudrate=baud)
 

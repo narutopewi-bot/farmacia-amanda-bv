@@ -266,6 +266,19 @@ app.post('/api/fiscal/print-sale/:id', async (req, res) => {
   }
 });
 
+// Confirmación y guardado del correlativo fiscal real emitido por el hardware local
+app.post('/api/sales/:id/fiscal-confirm', (req, res) => {
+  try {
+    const saleId = Number(req.params.id);
+    const { fiscal_invoice_number, fiscal_serial } = req.body;
+    db.prepare('UPDATE sales SET fiscal_invoice_number = ?, fiscal_serial = ? WHERE id = ?')
+      .run(fiscal_invoice_number, fiscal_serial || 'ACLAS-PP9', saleId);
+    res.json({ success: true, fiscal_invoice_number, fiscal_serial });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // =========================================================================
 // SERVICIO DE SINCRONIZACIÓN AUTOMÁTICA DE TASA OFICIAL BCV
 // =========================================================================

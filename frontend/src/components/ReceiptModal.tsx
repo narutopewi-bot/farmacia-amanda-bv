@@ -16,43 +16,91 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ sale, settings, auto
   const [fiscalMsg, setFiscalMsg] = useState<{ text: string; error?: boolean } | null>(null);
   const [currentFiscalNumber, setCurrentFiscalNumber] = useState(sale.fiscal_invoice_number || '');
 
-  const handlePrint = () => {
-    window.print();
-  };
-
   const handleFiscalPrint = async () => {
-    if (!sale.id) return;
+    if (!sale || !sale.id) return;
     setIsFiscalPrinting(true);
     setFiscalMsg(null);
     try {
-      const res = await fetch(`/api/fiscal/print-sale/${sale.id}`, { method: 'POST' });
+      const LOCAL_BRIDGE = 'http://127.0.0.1:9095';
+      const effectiveRate = Number(sale.exchange_rate || settings?.exchange_rate || 889.58);
+      const printerPort = settings?.fiscal_printer_port || 'USB';
+
+      const payload = {
+        receiptNumber: sale.invoice_number || sale.id,
+        saleId: sale.id,
+        port: printerPort,
+        model: settings?.fiscal_printer_model || 'ACLAS PP9 - PLUS',
+        client: {
+          name: sale.customer_name || 'CONSUMIDOR FINAL',
+          ci: sale.customer_id_number || 'V-00000000',
+          address: 'ARENALES, TORRES, LARA',
+          phone: ''
+        },
+        items: (sale.items || []).map(item => ({
+          name: item.product_name || 'MEDICAMENTO',
+          quantity: Number(item.quantity) || 1,
+          salePrice: Number(item.unit_price || 0) * effectiveRate, // precio unitario en Bs
+          taxPercentage: 0 // En farmacia los medicamentos son Exentos
+        })),
+        total: Number(sale.total || 0) * effectiveRate,
+        exchangeRate: effectiveRate,
+        isConvertedToVes: true,
+        payments: (sale.payments && sale.payments.length > 0)
+          ? sale.payments.map((p: any) => ({
+              method: p.payment_method || 'EFECTIVO',
+              amount: p.currency === 'USD' ? Number(p.amount) * effectiveRate : Number(p.amount),
+              currency: 'VES'
+            }))
+          : [{
+              method: sale.payment_method || 'EFECTIVO',
+              amount: Number(sale.total || 0) * effectiveRate,
+              currency: 'VES'
+            }]
+      };
+
+      const res = await fetch(`${LOCAL_BRIDGE}/api/fiscal/invoice`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(35000)
+      });
+
       const data = await res.json();
-      if (data.success) {
-        if (data.fiscal_invoice_number) {
-          setCurrentFiscalNumber(data.fiscal_invoice_number);
+      if (res.ok && data.success) {
+        const fiscalNum = data.fiscalInvoiceNumber || '';
+        const serialNum = data.printerSerial || 'ACLAS-PP9';
+        if (fiscalNum) {
+          setCurrentFiscalNumber(fiscalNum);
+          await fetch(`/api/sales/${sale.id}/fiscal-confirm`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              fiscal_invoice_number: fiscalNum,
+              fiscal_serial: serialNum
+            })
+          }).catch(console.warn);
         }
-        setFiscalMsg({ text: data.message || '✓ Factura Fiscal emitida en impresora ACLAS PP9-PLUS' });
+        setFiscalMsg({ text: `✓ Factura Fiscal #${fiscalNum} emitida exitosamente en ACLAS PP9-PLUS` });
       } else {
-        setFiscalMsg({ text: data.error || 'Error emitiendo factura fiscal', error: true });
+        throw new Error(data.error || 'Fallo de emisión en la controladora fiscal');
       }
     } catch (err: any) {
-      setFiscalMsg({ text: err.message || 'Error conectando con la impresora fiscal', error: true });
+      console.error('Error fiscal print:', err);
+      setFiscalMsg({
+        text: `Error de Impresora Fiscal: ${err.message || 'Verifica que iniciar-impresora-fiscal.bat esté abierto en esta máquina y el cable USB conectado.'}`,
+        error: true
+      });
     } finally {
       setIsFiscalPrinting(false);
     }
   };
 
-  // Disparo automático según modo seleccionado (térmico o fiscal)
+  // Disparo automático de impresión fiscal al abrir el modal si aún no tiene número fiscal
   useEffect(() => {
-    if (autoPrintMode === 'thermal') {
-      const timer = setTimeout(() => {
-        window.print();
-      }, 400);
-      return () => clearTimeout(timer);
-    } else if (autoPrintMode === 'fiscal' && !sale.fiscal_invoice_number) {
+    if (!currentFiscalNumber) {
       handleFiscalPrint();
     }
-  }, [sale?.id, autoPrintMode]);
+  }, [sale?.id]);
 
   const rate = sale.exchange_rate || settings?.exchange_rate || 85.0;
   const totalBs = sale.total_bs || (sale.total * rate);
@@ -254,31 +302,24 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ sale, settings, auto
             <button
               onClick={handleFiscalPrint}
               disabled={isFiscalPrinting}
-              className="flex-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold py-2.5 px-3 sm:px-4 rounded-xl flex items-center justify-center gap-2 shadow-md transition active:scale-98 cursor-pointer text-xs sm:text-sm"
+              className="flex-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-black py-3 px-4 rounded-xl flex items-center justify-center gap-2 shadow-lg transition active:scale-98 cursor-pointer text-xs sm:text-sm"
               title="Emitir Factura Fiscal legal en la máquina homologada ACLAS PP9-PLUS"
             >
               {isFiscalPrinting ? (
                 <>
-                  <Loader2 className="w-4 h-4 animate-spin text-blue-200" />
-                  <span>Transmitiendo a Impresora...</span>
+                  <Loader2 className="w-4 h-4 animate-spin text-white" />
+                  <span>Transmitiendo a Impresora ACLAS PP9...</span>
                 </>
               ) : (
                 <>
-                  <FileText className="w-4 h-4 text-blue-200" />
-                  <span>Factura Fiscal (ACLAS PP9)</span>
+                  <FileText className="w-4 h-4 text-white" />
+                  <span>Imprimir Factura Fiscal (ACLAS PP9)</span>
                 </>
               )}
             </button>
             <button
-              onClick={handlePrint}
-              className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold py-2.5 px-3 sm:px-4 rounded-xl flex items-center justify-center gap-2 shadow-md transition active:scale-98 cursor-pointer text-xs sm:text-sm"
-            >
-              <Printer className="w-4 h-4" />
-              <span>Ticket (80mm)</span>
-            </button>
-            <button
               onClick={onClose}
-              className="px-4 sm:px-5 py-2.5 border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold rounded-xl transition active:scale-98 text-xs sm:text-sm cursor-pointer"
+              className="px-5 py-3 border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold rounded-xl transition active:scale-98 text-xs sm:text-sm cursor-pointer"
             >
               Cerrar
             </button>
