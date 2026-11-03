@@ -274,6 +274,10 @@ app.post('/api/sales/:id/fiscal-confirm', (req, res) => {
     db.prepare('UPDATE sales SET fiscal_invoice_number = ?, fiscal_serial = ? WHERE id = ?')
       .run(fiscal_invoice_number, fiscal_serial || 'ACLAS-PP9', saleId);
     res.json({ success: true, fiscal_invoice_number, fiscal_serial });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 app.post('/api/sales/:id/credit-note-confirm', (req, res) => {
   try {
@@ -377,11 +381,6 @@ app.post('/api/sales/:id/void', (req, res) => {
     });
   } catch (err) {
     console.error('Error voiding sale:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });

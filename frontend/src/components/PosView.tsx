@@ -210,8 +210,13 @@ export const PosView: React.FC<PosViewProps> = ({
           employeeId: employees[0]?.id || 1
         })
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Error al anular la venta');
+      let data: any = null;
+      try {
+        data = await res.json();
+      } catch (e) {
+        throw new Error(`Error en el servidor (${res.status}): Verifique que el servicio esté activo.`);
+      }
+      if (!res.ok) throw new Error(data?.error || 'Error al anular la venta');
 
       const voidedSale = data.sale;
 
@@ -252,7 +257,12 @@ export const PosView: React.FC<PosViewProps> = ({
           signal: AbortSignal.timeout(35000)
         });
 
-        const ncData = await ncRes.json();
+        let ncData: any = null;
+        try {
+          ncData = await ncRes.json();
+        } catch (e) {
+          ncData = { success: false, error: 'Respuesta inválida del puente fiscal local' };
+        }
         if (ncRes.ok && ncData.success) {
           const ncNum = ncData.creditNoteNumber || ncData.fiscalInvoiceNumber || '';
           const ncSerial = ncData.printerSerial || 'ACLAS-PP9';

@@ -85,8 +85,13 @@ export const ReportsView: React.FC<Props> = ({ settings }) => {
           employeeId: 1
         })
       });
-      const voidData = await voidRes.json();
-      if (!voidRes.ok) throw new Error(voidData.error || 'Error al anular la venta en sistema');
+      let voidData: any = null;
+      try {
+        voidData = await voidRes.json();
+      } catch (e) {
+        throw new Error(`Error en el servidor (${voidRes.status}): Verifique el servicio.`);
+      }
+      if (!voidRes.ok) throw new Error(voidData?.error || 'Error al anular la venta en sistema');
 
       // Transmitir Nota de Crédito a la impresora fiscal física en localhost:9095 si está habilitado
       if (transmitToFiscalPrinter) {
@@ -135,7 +140,12 @@ export const ReportsView: React.FC<Props> = ({ settings }) => {
             signal: AbortSignal.timeout(35000)
           });
 
-          const ncData = await ncRes.json();
+          let ncData: any = null;
+          try {
+            ncData = await ncRes.json();
+          } catch (e) {
+            ncData = { success: false, error: 'Respuesta inválida del puente fiscal local' };
+          }
           if (ncRes.ok && ncData.success) {
             const ncNum = ncData.creditNoteNumber || ncData.fiscalInvoiceNumber || targetFiscalNumber;
             const ncSerial = ncData.printerSerial || targetFiscalSerial || 'ACLAS-PP9';
