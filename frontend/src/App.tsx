@@ -593,7 +593,7 @@ export function App() {
           )}
 
           {/* Module Screen Content */}
-          <main className="flex-1 min-w-0 p-3 sm:p-6 lg:p-7 pb-24 md:pb-8 overflow-x-hidden bg-[#090d16]">
+          <main className="flex-1 min-w-0 p-2 sm:p-4 lg:p-5 pb-20 md:pb-6 overflow-x-hidden bg-[#090d16]">
             {loading ? (
               <div className="bg-slate-900 p-12 text-center rounded-2xl border border-slate-800 text-slate-400 text-xs">
                 Cargando datos del sistema farmacéutico...

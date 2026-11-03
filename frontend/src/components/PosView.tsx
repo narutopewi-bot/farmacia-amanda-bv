@@ -166,6 +166,7 @@ export const PosView: React.FC<PosViewProps> = ({
   const [changeCurrency, setChangeCurrency] = useState<'USD' | 'BS'>('USD');
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState<boolean>(false);
   const [showMobileCart, setShowMobileCart] = useState<boolean>(false);
+  const [showProductImages, setShowProductImages] = useState<boolean>(false);
 
   const rate = settings?.exchange_rate || 85.0;
 
@@ -962,25 +963,25 @@ export const PosView: React.FC<PosViewProps> = ({
   };
 
   return (
-    <div className="min-h-[calc(100vh-6rem)] bg-[#0f172a] text-slate-100 rounded-3xl p-4 sm:p-6 space-y-5 animate-in fade-in duration-200 shadow-2xl border border-slate-800">
+    <div className="bg-[#0f172a] text-slate-100 rounded-2xl p-3 sm:p-4 lg:p-5 space-y-3.5 shadow-2xl border border-slate-800">
       
       {/* ========================================================================= */}
       {/* 1. TOP HEADER BAR: TITLE + CAJA CONTROLS + SEARCH                          */}
       {/* ========================================================================= */}
-      <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 pb-3 border-b border-slate-800/80">
+      <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3 pb-2.5 border-b border-slate-800">
         
         {/* Brand Title with Green Cross Icon */}
-        <div className="flex items-center gap-3 shrink-0">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#10b981] to-[#059669] flex items-center justify-center shadow-lg shadow-emerald-950/40 shrink-0">
-            <span className="text-white font-black text-2xl leading-none select-none">✚</span>
+        <div className="flex items-center gap-2.5 shrink-0">
+          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#10b981] to-[#059669] flex items-center justify-center shadow-md shadow-emerald-950/40 shrink-0">
+            <span className="text-white font-black text-lg leading-none select-none">✚</span>
           </div>
           <div>
-            <h1 className="text-2xl font-black tracking-tight text-white uppercase flex items-center gap-2">
-              VENTAS
-            </h1>
-            <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-center gap-2">
+              <h1 className="text-lg sm:text-xl font-black tracking-tight text-white uppercase">
+                VENTAS
+              </h1>
               <span className="text-[11px] text-slate-400 font-medium">
-                Tasa Oficial BCV: <strong className="text-amber-400 font-mono text-xs">Bs. {rate.toFixed(2)}</strong>
+                Tasa BCV: <strong className="text-amber-400 font-mono text-xs">Bs. {rate.toFixed(2)}</strong>
               </span>
               <button 
                 type="button"
@@ -990,7 +991,7 @@ export const PosView: React.FC<PosViewProps> = ({
                 title="Consultar y sincronizar tasa oficial del Banco Central de Venezuela en vivo"
               >
                 <RefreshCw className={`w-2.5 h-2.5 ${isSyncingBcv ? 'animate-spin text-emerald-400' : ''}`} />
-                <span>{isSyncingBcv ? 'Consultando...' : 'Sincronizar BCV'}</span>
+                <span>{isSyncingBcv ? '...' : 'BCV'}</span>
               </button>
               <button 
                 type="button"
@@ -1135,33 +1136,43 @@ export const PosView: React.FC<PosViewProps> = ({
           </button>
         </div>
 
-        {/* Search Bar matching mockup input */}
-        <div className="flex items-center gap-2.5 w-full xl:w-auto">
-          <div className="relative flex-1 xl:w-72">
-            <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+        {/* Search Bar */}
+        <div className="flex items-center gap-2 w-full xl:w-auto">
+          <div className="relative flex-1 xl:w-80">
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               type="text"
               value={search}
               onChange={e => setSearch(e.target.value)}
-              placeholder="Buscar medicamentos..."
-              className="w-full bg-[#1e293b] border border-slate-700/80 rounded-full pl-10 pr-9 py-2 text-xs text-white placeholder-slate-400 focus:outline-none focus:border-emerald-500 transition font-medium"
+              placeholder="Buscar medicamentos (nombre, código)..."
+              className="w-full bg-[#1e293b] border border-slate-700/80 rounded-xl pl-9 pr-8 py-1.5 text-xs text-white placeholder-slate-400 focus:outline-none focus:border-emerald-500 transition font-medium"
             />
             {search && (
               <button
                 type="button"
                 onClick={() => setSearch('')}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white cursor-pointer"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white p-0.5 cursor-pointer"
+                title="Limpiar búsqueda"
               >
                 <X className="w-3.5 h-3.5" />
               </button>
             )}
           </div>
+          {search && (
+            <button
+              type="button"
+              onClick={() => setSearch('')}
+              className="text-[10px] font-bold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 px-2.5 py-1.5 rounded-lg border border-slate-700 transition cursor-pointer shrink-0"
+            >
+              Ver todos ({products.length})
+            </button>
+          )}
 
           {/* Mobile Cart Button */}
           <button
             type="button"
             onClick={() => setShowMobileCart(true)}
-            className="lg:hidden relative p-2.5 bg-emerald-600 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-md"
+            className="lg:hidden relative p-2 bg-emerald-600 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-md"
           >
             <ShoppingCart className="w-4 h-4" />
             {cart.length > 0 && (
@@ -1174,283 +1185,386 @@ export const PosView: React.FC<PosViewProps> = ({
       </div>
 
       {/* ========================================================================= */}
-      {/* 2. CATEGORY FILTER PILLS (Horizontal Touch Scroll, matching Mockup 2)     */}
+      {/* 2. CATEGORY FILTER PILLS + VISTA RAPIDA TOGGLE                            */}
       {/* ========================================================================= */}
-      <div className="flex items-center gap-2.5 overflow-x-auto pb-1 scrollbar-none select-none">
-        {categories.map(cat => {
-          const isSelected = selectedCategory === cat;
-          return (
-            <button
-              key={cat}
-              onClick={() => setSelectedCategory(cat)}
-              className={`px-5 py-2 rounded-full text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
-                isSelected
-                  ? 'bg-[#10b981] text-white shadow-md shadow-emerald-950/50'
-                  : 'bg-[#1e293b] text-slate-300 hover:bg-[#334155] hover:text-white border border-slate-700/60'
-              }`}
-            >
-              {cat === 'ALL' ? 'Todos los Medicamentos' : cat}
-            </button>
-          );
-        })}
+      <div className="flex items-center justify-between gap-2 overflow-x-auto pb-0.5 select-none">
+        <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none">
+          {categories.map(cat => {
+            const isSelected = selectedCategory === cat;
+            return (
+              <button
+                key={cat}
+                onClick={() => {
+                  setSelectedCategory(cat);
+                  if (cat === 'ALL') setSearch('');
+                }}
+                className={`px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
+                  isSelected
+                    ? 'bg-[#10b981] text-white shadow-sm'
+                    : 'bg-[#1e293b] text-slate-300 hover:bg-[#334155] hover:text-white border border-slate-700/60'
+                }`}
+              >
+                {cat === 'ALL' ? 'Todos los Medicamentos' : cat}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* View mode toggle: Sin fotos (Rapido) vs Con fotos */}
+        <button
+          type="button"
+          onClick={() => setShowProductImages(prev => !prev)}
+          className={`shrink-0 px-2.5 py-1 rounded-full text-[11px] font-bold transition flex items-center gap-1 border cursor-pointer ${
+            showProductImages 
+              ? 'bg-blue-600/20 text-blue-300 border-blue-500/40 hover:bg-blue-600/30' 
+              : 'bg-emerald-600/20 text-emerald-300 border-emerald-500/40 hover:bg-emerald-600/30'
+          }`}
+          title={showProductImages ? 'Cambiar a modo rapido sin imagenes' : 'Ver productos con imagenes'}
+        >
+          <span>{showProductImages ? '🖼️ Con Fotos' : '⚡ Sin Fotos (Rapido)'}</span>
+        </button>
       </div>
 
       {/* ========================================================================= */}
-      {/* 3. MAIN WORKSPACE: 50-50 BALANCED GRID (6 COLS CATALOG + 6 COLS FACTURACIÓN) */}
+      {/* 3. MAIN WORKSPACE: 50-50 BALANCED GRID (6 COLS CATALOG + 6 COLS FACTURACION) */}
       {/* ========================================================================= */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
         
         {/* ----------------------------------------------------------------------- */}
         {/* LEFT: COMPACT PRODUCT SEARCH & CATALOG (6 cols on Desktop - 50% width)   */}
         {/* ----------------------------------------------------------------------- */}
-        <div className="lg:col-span-6 xl:col-span-6 space-y-4">
+        <div className="lg:col-span-6 xl:col-span-6 space-y-2">
+          {/* Status info bar: Count + active search tag */}
+          <div className="flex items-center justify-between text-[11px] text-slate-400 px-1">
+            <span>
+              Mostrando <strong className="text-white font-mono">{filteredProducts.length}</strong> medicamentos
+              {search && <span> para "<strong className="text-emerald-400">{search}</strong>"</span>}
+            </span>
+            {search && (
+              <button
+                type="button"
+                onClick={() => setSearch('')}
+                className="text-[10px] text-rose-400 hover:text-rose-300 underline font-bold cursor-pointer"
+              >
+                Limpiar busqueda
+              </button>
+            )}
+          </div>
+
           {filteredProducts.length === 0 ? (
-            <div className="bg-[#162032] border border-slate-800 rounded-2xl p-16 text-center text-slate-400 space-y-2">
-              <Package className="w-12 h-12 mx-auto text-slate-600 mb-2" />
-              <p className="font-extrabold text-white text-base">No se encontraron medicamentos</p>
-              <p className="text-xs text-slate-400">Intenta con otro término de búsqueda o selecciona otra categoría.</p>
+            <div className="bg-[#162032] border border-slate-800 rounded-2xl p-10 text-center text-slate-400 space-y-2">
+              <Package className="w-10 h-10 mx-auto text-slate-600 mb-1" />
+              <p className="font-extrabold text-white text-sm">No se encontraron medicamentos</p>
+              <p className="text-xs text-slate-400">Intenta con otro termino de busqueda o selecciona otra categoria.</p>
+              {search && (
+                <button
+                  type="button"
+                  onClick={() => setSearch('')}
+                  className="mt-2 px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition cursor-pointer"
+                >
+                  Ver todos los medicamentos
+                </button>
+              )}
             </div>
           ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-2.5 sm:gap-3">
-              {filteredProducts.map(product => {
-                const qtyInCart = cartQuantityMap[product.id] || 0;
-                const isOutOfStock = product.total_stock <= 0;
+            <div className="overflow-y-auto max-h-[calc(100vh-230px)] min-h-[380px] pr-1 scrollbar-thin">
+              {!showProductImages ? (
+                /* HIGH DENSITY FAST LIST/GRID (SIN IMAGENES) - MAXIMO ESPACIO */
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {filteredProducts.map(product => {
+                    const qtyInCart = cartQuantityMap[product.id] || 0;
+                    const isOutOfStock = product.total_stock <= 0;
 
-                return (
-                  <div
-                    key={product.id}
-                    onClick={() => !isOutOfStock && addToCart(product)}
-                    className={`bg-[#162032] border rounded-2xl p-3 flex flex-col justify-between transition-all duration-200 select-none shadow-sm cursor-pointer hover:border-emerald-500/70 hover:shadow-xl hover:-translate-y-0.5 active:scale-[0.98] relative group ${
-                      isOutOfStock
-                        ? 'border-slate-800/60 opacity-50 cursor-not-allowed'
-                        : 'border-slate-800/90'
-                    }`}
-                  >
-                    {/* White Image Container */}
-                    <div className="w-full bg-white rounded-xl h-24 sm:h-28 flex items-center justify-center p-2 relative overflow-hidden shadow-inner">
-                      
-                      {/* Green Stock Pill on Top Right of White Container */}
-                      <span className={`absolute top-2 right-2 text-[10px] font-black px-2 py-0.5 rounded-md shadow-xs ${
-                        isOutOfStock 
-                          ? 'bg-red-500 text-white' 
-                          : 'bg-[#10b981] text-white'
-                      }`}>
-                        {isOutOfStock ? 'Agotado' : `${product.total_stock} disp.`}
-                      </span>
-
-                      {/* In Cart Indicator */}
-                      {qtyInCart > 0 && (
-                        <span className="absolute top-2 left-2 bg-emerald-600 text-white text-[9px] font-black px-2 py-0.5 rounded-md shadow-xs flex items-center gap-1">
-                          <Check className="w-3 h-3" />
-                          {qtyInCart} en orden
-                        </span>
-                      )}
-
-                      {/* Medicine Image or High Quality Realistic Box Graphic */}
-                      {product.image_url ? (
-                        <img
-                          src={product.image_url}
-                          alt={product.name}
-                          loading="lazy"
-                          className="max-h-full max-w-full object-contain group-hover:scale-105 transition-transform duration-200"
-                        />
-                      ) : (
-                        <div className="w-full h-full flex flex-col justify-between p-1 select-none">
-                          <div className="h-2 w-full bg-gradient-to-r from-emerald-500 to-teal-400 rounded-full"></div>
-                          <div className="text-center my-auto">
-                            <span className="text-slate-900 font-extrabold text-xs block leading-tight truncate px-1">
+                    return (
+                      <div
+                        key={product.id}
+                        onClick={() => !isOutOfStock && addToCart(product)}
+                        className={`bg-[#162032] border rounded-xl p-2.5 flex flex-col justify-between transition-all select-none shadow-xs cursor-pointer hover:border-emerald-500/80 hover:bg-[#1b273d] active:scale-[0.98] group ${
+                          isOutOfStock
+                            ? 'border-slate-800/60 opacity-50 cursor-not-allowed'
+                            : 'border-slate-800/90'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-1.5">
+                          <div className="min-w-0 flex-1">
+                            <h3 className="text-white font-extrabold text-xs leading-snug truncate group-hover:text-emerald-300" title={product.name}>
                               {product.name}
-                            </span>
-                            <span className="text-slate-400 font-semibold text-[9px] block truncate">
-                              {product.laboratory || 'Uso Farmacéutico'}
-                            </span>
+                            </h3>
+                            <p className="text-slate-400 text-[10px] font-medium truncate mt-0.5">
+                              {product.generic_name || product.presentation || 'Medicamento'} {product.laboratory ? `• ${product.laboratory}` : ''}
+                            </p>
                           </div>
-                          <div className="flex justify-between items-center text-[8px] text-slate-400 font-bold px-1 border-t border-slate-100 pt-0.5">
-                            <span>{product.presentation || 'Caja'}</span>
-                            <span className="text-emerald-700 font-extrabold">RX</span>
+                          <div className="shrink-0 flex flex-col items-end gap-1">
+                            <span className={`text-[9px] font-black px-1.5 py-0.5 rounded shadow-xs ${
+                              isOutOfStock 
+                                ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40' 
+                                : 'bg-[#10b981] text-white'
+                            }`}>
+                              {isOutOfStock ? 'Agotado' : `${product.total_stock} disp.`}
+                            </span>
+                            {qtyInCart > 0 && (
+                              <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-emerald-600 text-white flex items-center gap-0.5 shadow-xs">
+                                ✓ {qtyInCart}
+                              </span>
+                            )}
                           </div>
                         </div>
-                      )}
-                    </div>
 
-                    {/* Product Name & Generic Name */}
-                    <div className="mt-2.5 mb-1.5 min-w-0">
-                      <h3 className="text-white font-extrabold text-xs sm:text-sm leading-snug truncate group-hover:text-emerald-300 transition">
-                        {product.name}
-                      </h3>
-                      <p className="text-slate-400 text-[11px] font-medium truncate mt-0.5">
-                        {product.generic_name || product.presentation || 'Medicamento'}
-                      </p>
-                    </div>
+                        <div className="mt-2 pt-1.5 border-t border-slate-800/80 flex items-center justify-between">
+                          <div className="flex items-baseline gap-1 truncate">
+                            <span className="text-white font-black text-sm font-mono">${product.selling_price.toFixed(2)}</span>
+                            <span className="text-slate-400 text-[10px] font-mono truncate">
+                              / Bs. {(product.selling_price * rate).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </span>
+                          </div>
+                          <span className="text-[10px] font-bold text-emerald-300 bg-emerald-950/80 group-hover:bg-emerald-900 group-hover:text-white px-2 py-0.5 rounded border border-emerald-700/50 shrink-0 transition">
+                            + Cargar
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                /* MODO TARJETAS CON FOTOS (OPCIONAL) */
+                <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-2.5 sm:gap-3">
+                  {filteredProducts.map(product => {
+                    const qtyInCart = cartQuantityMap[product.id] || 0;
+                    const isOutOfStock = product.total_stock <= 0;
 
-                    {/* Dual Price on One Line */}
-                    <div className="text-xs font-semibold mt-1 pt-1.5 border-t border-slate-800/80 flex items-baseline gap-1.5 truncate">
-                      <span className="text-white font-black text-sm font-mono">
-                        ${product.selling_price.toFixed(2)}
-                      </span>
-                      <span className="text-slate-400 text-[10px] font-medium font-mono truncate">
-                        / Bs. {(product.selling_price * rate).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </span>
-                    </div>
+                    return (
+                      <div
+                        key={product.id}
+                        onClick={() => !isOutOfStock && addToCart(product)}
+                        className={`bg-[#162032] border rounded-2xl p-3 flex flex-col justify-between transition-all select-none shadow-sm cursor-pointer hover:border-emerald-500/70 hover:shadow-xl hover:-translate-y-0.5 active:scale-[0.98] relative group ${
+                          isOutOfStock
+                            ? 'border-slate-800/60 opacity-50 cursor-not-allowed'
+                            : 'border-slate-800/90'
+                        }`}
+                      >
+                        <div className="w-full bg-white rounded-xl h-24 sm:h-28 flex items-center justify-center p-2 relative overflow-hidden shadow-inner">
+                          <span className={`absolute top-2 right-2 text-[10px] font-black px-2 py-0.5 rounded-md shadow-xs ${
+                            isOutOfStock 
+                              ? 'bg-red-500 text-white' 
+                              : 'bg-[#10b981] text-white'
+                          }`}>
+                            {isOutOfStock ? 'Agotado' : `${product.total_stock} disp.`}
+                          </span>
 
-                  </div>
-                );
-              })}
+                          {qtyInCart > 0 && (
+                            <span className="absolute top-2 left-2 bg-emerald-600 text-white text-[9px] font-black px-2 py-0.5 rounded-md shadow-xs flex items-center gap-1">
+                              <Check className="w-3 h-3" />
+                              {qtyInCart} en orden
+                            </span>
+                          )}
+
+                          {product.image_url ? (
+                            <img
+                              src={product.image_url}
+                              alt={product.name}
+                              loading="lazy"
+                              className="max-h-full max-w-full object-contain group-hover:scale-105 transition-transform duration-200"
+                            />
+                          ) : (
+                            <div className="w-full h-full flex flex-col justify-between p-1 select-none">
+                              <div className="h-2 w-full bg-gradient-to-r from-emerald-500 to-teal-400 rounded-full"></div>
+                              <div className="text-center my-auto">
+                                <span className="text-slate-900 font-extrabold text-xs block leading-tight truncate px-1">
+                                  {product.name}
+                                </span>
+                                <span className="text-slate-400 font-semibold text-[9px] block truncate">
+                                  {product.laboratory || 'Uso Farmaceutico'}
+                                </span>
+                              </div>
+                              <div className="flex justify-between items-center text-[8px] text-slate-400 font-bold px-1 border-t border-slate-100 pt-0.5">
+                                <span>{product.presentation || 'Caja'}</span>
+                                <span className="text-emerald-700 font-extrabold">RX</span>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="mt-2.5 mb-1.5 min-w-0">
+                          <h3 className="text-white font-extrabold text-xs sm:text-sm leading-snug truncate group-hover:text-emerald-300 transition">
+                            {product.name}
+                          </h3>
+                          <p className="text-slate-400 text-[11px] font-medium truncate mt-0.5">
+                            {product.generic_name || product.presentation || 'Medicamento'}
+                          </p>
+                        </div>
+
+                        <div className="text-xs font-semibold mt-1 pt-1.5 border-t border-slate-800/80 flex items-baseline gap-1.5 truncate">
+                          <span className="text-white font-black text-sm font-mono">
+                            ${product.selling_price.toFixed(2)}
+                          </span>
+                          <span className="text-slate-400 text-[10px] font-medium font-mono truncate">
+                            / Bs. {(product.selling_price * rate).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
         </div>
 
         {/* ----------------------------------------------------------------------- */}
-        {/* RIGHT: FACTURACIÓN Y ORDEN DE COBRO (6 cols on Desktop - 50% width)      */}
+        {/* RIGHT: FACTURACION Y ORDEN DE COBRO (6 cols on Desktop - 50% width)      */}
         {/* ----------------------------------------------------------------------- */}
-        <div className="hidden lg:block lg:col-span-6 xl:col-span-6 sticky top-20">
-          <div className="bg-[#162032] border border-slate-800/90 rounded-2xl p-4 sm:p-5 flex flex-col justify-between shadow-2xl min-h-[640px] text-white">
-            
-            <div>
-              {/* Header: Cart (X) and Close/Clear */}
-              <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-                <div className="flex items-center gap-2.5">
-                  <ShoppingCart className="w-5 h-5 text-emerald-400" />
-                  <h2 className="text-base sm:text-lg font-black text-white tracking-wide">
-                    Facturación y Orden de Cobro <span className="text-emerald-400 font-extrabold font-mono text-sm">({cart.reduce((a, b) => a + b.quantity, 0)} ítems)</span>
-                  </h2>
-                </div>
-                {cart.length > 0 && (
-                  <button
-                    onClick={clearCart}
-                    className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-slate-800/60 rounded-lg transition cursor-pointer"
-                    title="Vaciar orden"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                )}
+        <div className="hidden lg:flex lg:col-span-6 xl:col-span-6 flex-col bg-[#162032] border border-slate-800/90 rounded-2xl p-3 sm:p-4 shadow-xl text-white max-h-[calc(100vh-210px)] justify-between">
+          
+          {/* Top Cart Header */}
+          <div className="flex items-center justify-between pb-2.5 border-b border-slate-800 shrink-0">
+            <div className="flex items-center gap-2">
+              <ShoppingCart className="w-4 h-4 text-emerald-400" />
+              <h2 className="text-sm sm:text-base font-black text-white tracking-wide">
+                Facturacion y Orden de Cobro
+              </h2>
+              <span className="text-emerald-400 font-extrabold font-mono text-xs bg-emerald-950/80 px-2 py-0.5 rounded-full border border-emerald-800/60">
+                {cart.reduce((a, b) => a + b.quantity, 0)} items
+              </span>
+            </div>
+            {cart.length > 0 && (
+              <button
+                type="button"
+                onClick={clearCart}
+                className="text-[11px] text-slate-400 hover:text-rose-400 hover:bg-slate-800/60 px-2 py-1 rounded-lg transition cursor-pointer flex items-center gap-1"
+                title="Vaciar orden"
+              >
+                <X className="w-3.5 h-3.5" />
+                <span>Vaciar</span>
+              </button>
+            )}
+          </div>
+
+          {/* Cart Items List - Ultra Compact High-Density without Images */}
+          <div className="py-2 space-y-1.5 flex-1 overflow-y-auto max-h-[220px] xl:max-h-[260px] pr-1">
+            {cart.length === 0 ? (
+              <div className="py-8 text-center text-slate-500 space-y-1">
+                <Package className="w-8 h-8 mx-auto text-slate-600 mb-1" />
+                <p className="text-xs font-bold text-slate-300">El carrito de facturacion esta vacio</p>
+                <p className="text-[11px] text-slate-500">Toca cualquier medicamento del catalogo para cargarlo a la orden.</p>
               </div>
-
-              {/* Cart Items List - Ultra Compact High-Density without Images */}
-              <div className="py-2.5 space-y-2 max-h-[500px] overflow-y-auto pr-1.5">
-                {cart.length === 0 ? (
-                  <div className="py-20 text-center text-slate-500 space-y-1">
-                    <p className="text-base font-bold text-slate-300">El carrito de facturación está vacío</p>
-                    <p className="text-xs text-slate-500">Toca cualquier medicamento del catálogo de la izquierda para cargarlo a la orden.</p>
-                  </div>
-                ) : (
-                  cart.map(({ product, quantity }) => (
-                    <div
-                      key={product.id}
-                      className="bg-[#0f172a] rounded-xl px-3 py-2 sm:py-2.5 flex items-center justify-between gap-2.5 border border-slate-800/80 hover:border-slate-700/80 transition shadow-xs group"
-                    >
-                      {/* Product Name and Price Details (No Images) */}
-                      <div className="flex-1 min-w-0 pr-2">
-                        <h4 className="text-white font-extrabold text-xs sm:text-sm leading-snug truncate" title={product.name}>
-                          {product.name}
-                        </h4>
-                        <div className="flex items-center gap-2 text-[11px] text-slate-400 mt-0.5">
-                          <span className="truncate max-w-[130px] font-medium">
-                            {product.presentation || product.generic_name || 'Uso Farmacéutico'}
-                          </span>
-                          <span className="text-slate-600 font-mono">&bull;</span>
-                          <span className="text-slate-300 font-mono font-semibold">${product.selling_price.toFixed(2)} c/u</span>
-                        </div>
-                      </div>
-
-                      {/* Stepper (+ / -) */}
-                      <div className="flex items-center gap-1.5 shrink-0 bg-slate-800/90 rounded-lg p-1 border border-slate-700/60">
-                        <button
-                          type="button"
-                          onClick={() => updateQuantity(product.id, quantity - 1)}
-                          className="w-6 h-6 rounded-md bg-slate-700 hover:bg-slate-600 text-slate-100 flex items-center justify-center text-xs font-black transition cursor-pointer active:scale-95"
-                          title="Restar 1 unidad"
-                        >
-                          -
-                        </button>
-                        <span className="text-xs font-black text-emerald-400 font-mono w-6 text-center select-none">
-                          {quantity}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => updateQuantity(product.id, quantity + 1)}
-                          className="w-6 h-6 rounded-md bg-slate-700 hover:bg-slate-600 text-slate-100 flex items-center justify-center text-xs font-black transition cursor-pointer active:scale-95"
-                          title="Sumar 1 unidad"
-                        >
-                          +
-                        </button>
-                      </div>
-
-                      {/* Total Line Price */}
-                      <div className="text-right shrink-0 min-w-[70px]">
-                        <span className="text-emerald-400 font-black text-sm font-mono block leading-none">
-                          ${(product.selling_price * quantity).toFixed(2)}
-                        </span>
-                        <span className="text-slate-400 text-[10px] font-medium font-mono block leading-none mt-1">
-                          Bs. {(product.selling_price * quantity * rate).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </span>
-                      </div>
-
-                      {/* Trash button */}
-                      <button
-                        type="button"
-                        onClick={() => removeFromCart(product.id)}
-                        className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-rose-950/40 rounded-lg cursor-pointer transition shrink-0"
-                        title="Eliminar de la orden"
-                      >
-                        <Trash2 className="w-4 h-4 text-rose-400/80 group-hover:text-rose-400" />
-                      </button>
+            ) : (
+              cart.map(({ product, quantity }) => (
+                <div
+                  key={product.id}
+                  className="bg-[#0f172a] rounded-xl px-2.5 py-1.5 flex items-center justify-between gap-2 border border-slate-800/80 hover:border-slate-700/80 transition shadow-xs group"
+                >
+                  {/* Name and unit price */}
+                  <div className="flex-1 min-w-0 pr-1">
+                    <h4 className="text-white font-extrabold text-xs leading-tight truncate" title={product.name}>
+                      {product.name}
+                    </h4>
+                    <div className="flex items-center gap-1.5 text-[10px] text-slate-400 mt-0.5">
+                      <span className="truncate max-w-[120px] font-medium">
+                        {product.presentation || product.generic_name || 'Uso Farmaceutico'}
+                      </span>
+                      <span className="text-slate-600 font-mono">&bull;</span>
+                      <span className="text-slate-300 font-mono font-semibold">${product.selling_price.toFixed(2)}</span>
                     </div>
-                  ))
-                )}
+                  </div>
+
+                  {/* Stepper (- / +) */}
+                  <div className="flex items-center gap-1 shrink-0 bg-slate-800/90 rounded-lg p-0.5 border border-slate-700/60">
+                    <button
+                      type="button"
+                      onClick={() => updateQuantity(product.id, quantity - 1)}
+                      className="w-5 h-5 rounded bg-slate-700 hover:bg-slate-600 text-slate-100 flex items-center justify-center text-xs font-black transition cursor-pointer active:scale-95"
+                      title="Restar 1 unidad"
+                    >
+                      -
+                    </button>
+                    <span className="text-xs font-black text-emerald-400 font-mono w-5 text-center select-none">
+                      {quantity}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => updateQuantity(product.id, quantity + 1)}
+                      className="w-5 h-5 rounded bg-slate-700 hover:bg-slate-600 text-slate-100 flex items-center justify-center text-xs font-black transition cursor-pointer active:scale-95"
+                      title="Sumar 1 unidad"
+                    >
+                      +
+                    </button>
+                  </div>
+
+                  {/* Line Total */}
+                  <div className="text-right shrink-0 min-w-[65px]">
+                    <span className="text-emerald-400 font-black text-xs font-mono block leading-none">
+                      ${(product.selling_price * quantity).toFixed(2)}
+                    </span>
+                    <span className="text-slate-400 text-[9px] font-medium font-mono block leading-none mt-0.5">
+                      Bs. {(product.selling_price * quantity * rate).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
+
+                  {/* Delete */}
+                  <button
+                    type="button"
+                    onClick={() => removeFromCart(product.id)}
+                    className="p-1 text-slate-500 hover:text-rose-400 hover:bg-rose-950/40 rounded cursor-pointer transition shrink-0"
+                    title="Eliminar de la orden"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 text-rose-400/80 group-hover:text-rose-400" />
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+
+          {/* Bottom Summary and Cobrar Button */}
+          <div className="pt-2 border-t border-slate-800 space-y-2 shrink-0">
+            {/* 3-Col Financial Mini-Strip */}
+            <div className="grid grid-cols-3 gap-1.5 p-1.5 bg-[#0f172a] rounded-xl border border-slate-800/90 text-center">
+              <div>
+                <span className="text-[9px] uppercase font-bold text-slate-400 block leading-tight">Subtotal</span>
+                <span className="text-xs font-mono font-bold text-white leading-tight">${subtotal.toFixed(2)}</span>
+              </div>
+              <div>
+                <span className="text-[9px] uppercase font-bold text-slate-400 block leading-tight">IVA (16%)</span>
+                <span className="text-xs font-mono font-bold text-amber-400 leading-tight">
+                  {taxUsd > 0 ? `$${taxUsd.toFixed(2)}` : 'Exento'}
+                </span>
+              </div>
+              <div>
+                <span className="text-[9px] uppercase font-bold text-slate-400 block leading-tight">Tasa BCV</span>
+                <span className="text-xs font-mono font-bold text-slate-300 leading-tight">Bs. {rate.toFixed(2)}</span>
               </div>
             </div>
 
-            {/* Bottom Summary */}
-            <div className="pt-3 border-t border-slate-800 space-y-2.5">
-              
-              <div className="flex items-center justify-between text-xs text-slate-300">
-                <span>Subtotal</span>
-                <span className="font-mono font-bold text-white">${subtotal.toFixed(2)}</span>
+            {/* Total Banner */}
+            <div className="flex items-center justify-between px-3 py-1.5 bg-gradient-to-r from-emerald-950/40 via-slate-900 to-slate-900 rounded-xl border border-emerald-500/30">
+              <div>
+                <span className="text-[10px] uppercase font-black text-slate-300 tracking-wider block">Total a Pagar</span>
+                <span className="text-[9px] text-slate-400">Impuestos y tasa oficial incluidos</span>
               </div>
-
-              <div className="flex items-center justify-between text-xs text-slate-300">
-                <span>IVA (16%)</span>
-                <span className="font-mono font-bold text-amber-400">
-                  {taxUsd > 0 ? `$${taxUsd.toFixed(2)} / Bs. ${(taxUsd * rate).toFixed(2)}` : 'Exento'}
+              <div className="text-right">
+                <span className="text-xl sm:text-2xl font-black text-white font-mono block leading-none">
+                  ${totalUsd.toFixed(2)}
+                </span>
+                <span className="text-[11px] font-bold text-emerald-400 font-mono mt-0.5 block leading-none">
+                  Bs. {(totalUsd * rate).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
               </div>
+            </div>
 
-              <div className="flex items-center justify-between text-xs text-slate-300">
-                <span>Tasa Oficial BCV</span>
-                <span className="font-mono text-slate-400">Bs. {rate.toFixed(2)}</span>
-              </div>
-
-              {/* Total Display */}
-              <div className="flex items-baseline justify-between pt-2.5 pb-1 border-t border-slate-700/80">
-                <div>
-                  <span className="text-xs sm:text-sm uppercase font-black text-slate-300 tracking-wider block">Total a Pagar</span>
-                  <span className="text-[11px] text-slate-400">Impuestos y tasa incluidos</span>
-                </div>
-                <div className="text-right">
-                  <span className="text-2xl sm:text-3xl font-black text-white font-mono block leading-none">
-                    ${totalUsd.toFixed(2)}
-                  </span>
-                  <span className="text-sm sm:text-base font-bold text-emerald-400 font-mono mt-1 block">
-                    Bs. {(totalUsd * rate).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </span>
-                </div>
-              </div>
-
-              {/* Minimal Client Selector Dropdown with Quick Register Button */}
-              <div className="pt-1">
-                <div className="flex items-center justify-between mb-1">
-                  <label className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1">
-                    <UserCheck className="w-3.5 h-3.5 text-emerald-400" />
+            {/* Cliente & Tipo de Venta (Contado / Credito) on One Compact Row */}
+            <div className="grid grid-cols-12 gap-1.5 items-center">
+              {/* Cliente Selector (8 cols) */}
+              <div className="col-span-8">
+                <div className="flex items-center justify-between mb-0.5">
+                  <label className="text-[9px] uppercase font-bold text-slate-400 flex items-center gap-1">
+                    <UserCheck className="w-3 h-3 text-emerald-400" />
                     <span>Cliente</span>
                   </label>
                   <button
                     type="button"
                     onClick={() => setShowNewCustomerModal(true)}
-                    className="text-[10px] font-black text-emerald-400 hover:text-emerald-300 flex items-center gap-1 bg-emerald-500/10 hover:bg-emerald-500/20 px-2 py-0.5 rounded-md border border-emerald-500/30 transition cursor-pointer active:scale-95"
-                    title="Registrar nuevo cliente rápido sin salir del POS"
+                    className="text-[9px] font-black text-emerald-400 hover:text-emerald-300 flex items-center gap-0.5 bg-emerald-500/10 hover:bg-emerald-500/20 px-1.5 py-0.2 rounded border border-emerald-500/30 transition cursor-pointer"
                   >
-                    <UserPlus className="w-3 h-3" />
+                    <UserPlus className="w-2.5 h-2.5" />
                     <span>+ Nuevo</span>
                   </button>
                 </div>
@@ -1458,79 +1572,61 @@ export const PosView: React.FC<PosViewProps> = ({
                   <select
                     value={selectedCustomerId}
                     onChange={e => setSelectedCustomerId(Number(e.target.value))}
-                    className="w-full bg-[#0f172a] border border-slate-800 rounded-xl px-3 py-2 text-xs text-white appearance-none focus:outline-none focus:border-emerald-500 cursor-pointer font-medium pr-8"
+                    className="w-full bg-[#0f172a] border border-slate-800 rounded-lg px-2 py-1 text-xs text-white appearance-none focus:outline-none focus:border-emerald-500 cursor-pointer font-medium pr-6 truncate"
                   >
                     {customersList.map(c => (
                       <option key={c.id} value={c.id}>
-                        {c.name} {c.id_number ? `(${c.id_number})` : ''} {c.current_debt > 0 ? `[Deuda: $${c.current_debt.toFixed(2)}]` : ''}
+                        {c.name} {c.id_number ? `(${c.id_number})` : ''}
                       </option>
                     ))}
                   </select>
-                  <ChevronDown className="w-4 h-4 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                 </div>
-
-                {/* Chip informativo si no es Consumidor Final */}
-                {selectedCustomer && selectedCustomer.id !== 1 && (
-                  <div className="mt-1.5 p-2 bg-slate-900/90 rounded-xl border border-slate-800 text-[11px] text-slate-300 flex items-center justify-between">
-                    <div>
-                      <span className="font-bold text-white block">{selectedCustomer.name}</span>
-                      <span className="text-[10px] text-slate-400">
-                        {selectedCustomer.id_number || 'Sin C.I.'} {selectedCustomer.phone ? `• ${selectedCustomer.phone}` : ''}
-                      </span>
-                    </div>
-                    {selectedCustomer.credit_limit > 0 && (
-                      <div className="text-right">
-                        <span className="text-[9px] uppercase font-bold text-slate-400 block">Límite Crédito</span>
-                        <span className="font-mono font-bold text-emerald-400">${selectedCustomer.credit_limit.toFixed(2)}</span>
-                      </div>
-                    )}
-                  </div>
-                )}
               </div>
 
-              {/* Mode Toggle: Contado / Crédito */}
-              <div className="flex items-center justify-between gap-2 pt-1">
-                <button
-                  type="button"
-                  onClick={() => setSaleType('CONTADO')}
-                  className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer border ${
-                    saleType === 'CONTADO'
-                      ? 'bg-emerald-600 text-white border-emerald-500'
-                      : 'bg-slate-900 text-slate-400 border-slate-800'
-                  }`}
-                >
-                  Contado
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSaleType('CREDITO')}
-                  className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer border ${
-                    saleType === 'CREDITO'
-                      ? 'bg-amber-600 text-white border-amber-500'
-                      : 'bg-slate-900 text-slate-400 border-slate-800'
-                  }`}
-                >
-                  Crédito
-                </button>
+              {/* Contado / Credito Toggle (4 cols) */}
+              <div className="col-span-4">
+                <label className="text-[9px] uppercase font-bold text-slate-400 block mb-0.5">Condicion</label>
+                <div className="grid grid-cols-2 gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setSaleType('CONTADO')}
+                    className={`py-1 rounded-lg text-[10px] font-black transition cursor-pointer border text-center ${
+                      saleType === 'CONTADO'
+                        ? 'bg-emerald-600 text-white border-emerald-500 shadow-xs'
+                        : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-white'
+                    }`}
+                  >
+                    Contado
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSaleType('CREDITO')}
+                    className={`py-1 rounded-lg text-[10px] font-black transition cursor-pointer border text-center ${
+                      saleType === 'CREDITO'
+                        ? 'bg-amber-600 text-white border-amber-500 shadow-xs'
+                        : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-white'
+                    }`}
+                  >
+                    Credito
+                  </button>
+                </div>
               </div>
-
-              {/* Single Clean Checkout Button */}
-              <div className="mt-3">
-                <button
-                  type="button"
-                  disabled={cart.length === 0}
-                  onClick={handleOpenCheckoutModal}
-                  className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 active:scale-[0.99] text-white font-black text-base sm:text-lg rounded-2xl transition shadow-xl shadow-emerald-950/50 flex items-center justify-center gap-2.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                  title="Cobrar orden de venta"
-                >
-                  <CreditCard className="w-5 h-5 text-emerald-100" />
-                  <span>Cobrar &bull; ${totalUsd.toFixed(2)}</span>
-                </button>
-              </div>
-
             </div>
 
+            {/* Cobrar Button */}
+            <button
+              type="button"
+              disabled={cart.length === 0}
+              onClick={handleOpenCheckoutModal}
+              className="w-full py-2.5 sm:py-3 bg-emerald-600 hover:bg-emerald-500 active:scale-[0.99] text-white font-black text-sm sm:text-base rounded-xl transition shadow-lg shadow-emerald-950/50 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+              title="Cobrar orden de venta y emitir factura fiscal SENIAT"
+            >
+              <CreditCard className="w-4 h-4 text-emerald-100" />
+              <span>Cobrar (Factura Fiscal) &bull; ${totalUsd.toFixed(2)}</span>
+            </button>
           </div>
+
         </div>
 
       </div>
