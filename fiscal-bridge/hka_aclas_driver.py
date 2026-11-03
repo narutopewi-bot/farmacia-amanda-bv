@@ -694,15 +694,15 @@ class HkaAclasDriver:
 
         # Consultar S1 previo para obtener el serial real de la máquina si no fue provisto
         s1_pre, _ = self.get_s1_data()
-        real_serial = s1_pre.get("serialNumber", "Z1B1234567") if s1_pre else "Z1B1234567"
+        real_serial = s1_pre.get("serialNumber", "ZZP0014899") if s1_pre else "ZZP0014899"
 
         orig_invoice_raw = str(payload.get("originalInvoiceNumber") or "1").strip()
         orig_digits = "".join(ch for ch in orig_invoice_raw if ch.isdigit())
         orig_invoice = f"{int(orig_digits):08d}" if orig_digits else "00000001"
 
         orig_serial = str(payload.get("originalPrinterSerial") or real_serial).strip()
-        if not orig_serial or orig_serial in ["ACLAS-PP9", "PP9-00000000"]:
-            orig_serial = real_serial
+        if not orig_serial or orig_serial in ["ACLAS-PP9", "PP9-00000000", "Z1B1234567"]:
+            orig_serial = "ZZP0014899" if real_serial in ["Z1B1234567", "ACLAS-PP9"] else real_serial
 
         orig_date = str(payload.get("originalInvoiceDate") or time.strftime("%d/%m/%Y")).strip()
         if "-" in orig_date and len(orig_date) >= 10:

@@ -498,6 +498,23 @@ class FiscalHandler(BaseHTTPRequestHandler):
             assigned_port = CONFIG.get("port", "COM1") if is_aclas else "USB Directo (WinUSB)"
             distributor = "The Factory HKA, C.A." if is_aclas else "Corporación ECRS, C.A."
             seniat_reg = CONFIG.get("registroSeniat", "HKA-PP9PLUS" if is_aclas else "GER-0001")
+            last_inv = CONFIG.get("lastInvoiceNumber", "00016621")
+            printer_serial = CONFIG.get("serialNumber", "ZZP0014899")
+            if is_aclas and aclas_driver_available:
+                try:
+                    driver = get_aclas_driver()
+                    s1, _ = driver.get_s1_data()
+                    if s1:
+                        if s1.get("lastInvoiceNumber"):
+                            last_inv = s1.get("lastInvoiceNumber")
+                            CONFIG["lastInvoiceNumber"] = last_inv
+                        if s1.get("serialNumber"):
+                            printer_serial = s1.get("serialNumber")
+                            CONFIG["serialNumber"] = printer_serial
+                except Exception:
+                    pass
+
+            next_inv = f"{int(last_inv) + 1:08d}" if str(last_inv).isdigit() else "00016622"
 
             data = {
                 "online": True,
@@ -508,7 +525,10 @@ class FiscalHandler(BaseHTTPRequestHandler):
                 "driver": "ACLAS_HKA" if is_aclas else "DEVTECH_ECRS",
                 "distributor": distributor,
                 "seniatRegister": seniat_reg,
-                "printerSerial": CONFIG.get("serialNumber", "PP9-00000000" if is_aclas else "VE2408000611"),
+                "printerSerial": printer_serial,
+                "lastInvoiceNumber": last_inv,
+                "nextInvoiceNumber": next_inv,
+                "rif": CONFIG.get("rif", "J-503951060"),
                 "assignedPort": assigned_port,
                 "baudRate": int(CONFIG.get("baudRate", 9600)),
                 "availableModels": [

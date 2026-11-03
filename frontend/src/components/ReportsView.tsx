@@ -31,7 +31,7 @@ export const ReportsView: React.FC<Props> = ({ settings }) => {
   // Estados para Anulaciones y Notas de Crédito SENIAT
   const [saleToVoid, setSaleToVoid] = useState<any>(null);
   const [targetFiscalNumber, setTargetFiscalNumber] = useState<string>('');
-  const [targetFiscalSerial, setTargetFiscalSerial] = useState<string>('ACLAS-PP9');
+  const [targetFiscalSerial, setTargetFiscalSerial] = useState<string>('ZZP0014899');
   const [voidReason, setVoidReason] = useState<string>('Devolución de cliente / Corrección de factura');
   const [transmitToFiscalPrinter, setTransmitToFiscalPrinter] = useState<boolean>(true);
   const [isVoidingSale, setIsVoidingSale] = useState<boolean>(false);
@@ -41,7 +41,7 @@ export const ReportsView: React.FC<Props> = ({ settings }) => {
   // Estados para Nota de Crédito Manual / Fiscal Directa
   const [showManualNcModal, setShowManualNcModal] = useState<boolean>(false);
   const [manualNcNumber, setManualNcNumber] = useState<string>('');
-  const [manualNcSerial, setManualNcSerial] = useState<string>('ACLAS-PP9');
+  const [manualNcSerial, setManualNcSerial] = useState<string>('ZZP0014899');
   const [manualNcDate, setManualNcDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [manualNcConcept, setManualNcConcept] = useState<string>('Devolución de medicamentos');
   const [manualNcAmountUsd, setManualNcAmountUsd] = useState<string>('');
@@ -56,8 +56,8 @@ export const ReportsView: React.FC<Props> = ({ settings }) => {
   const handleOpenVoidModal = (inv: any) => {
     setSaleToVoid(inv);
     const defaultNum = inv.fiscal_invoice_number || (inv.invoice_number ? inv.invoice_number.replace(/\D/g, '') : '00000003');
-    setTargetFiscalNumber(defaultNum || '00000003');
-    setTargetFiscalSerial(inv.fiscal_serial || 'ACLAS-PP9');
+    setTargetFiscalNumber(defaultNum || '00016621');
+    setTargetFiscalSerial(inv.fiscal_serial || 'ZZP0014899');
     setVoidReason('Devolución de cliente / Corrección de factura');
     setTransmitToFiscalPrinter(true);
   };
@@ -110,8 +110,8 @@ export const ReportsView: React.FC<Props> = ({ settings }) => {
           ];
 
           const creditPayload = {
-            originalInvoiceNumber: targetFiscalNumber || fullSale.fiscal_invoice_number || '00000003',
-            originalPrinterSerial: targetFiscalSerial || fullSale.fiscal_serial || 'ACLAS-PP9',
+            originalInvoiceNumber: targetFiscalNumber || fullSale.fiscal_invoice_number || '00016621',
+            originalPrinterSerial: targetFiscalSerial || fullSale.fiscal_serial || 'ZZP0014899',
             originalInvoiceDate: fullSale.created_at || new Date().toISOString().split('T')[0],
             port: printerPort,
             model: settings?.fiscal_printer_model || 'ACLAS PP9 - PLUS',
@@ -148,7 +148,7 @@ export const ReportsView: React.FC<Props> = ({ settings }) => {
           }
           if (ncRes.ok && ncData.success) {
             const ncNum = ncData.creditNoteNumber || ncData.fiscalInvoiceNumber || targetFiscalNumber;
-            const ncSerial = ncData.printerSerial || targetFiscalSerial || 'ACLAS-PP9';
+            const ncSerial = ncData.printerSerial || targetFiscalSerial || 'ZZP0014899';
             await fetch(`/api/sales/${saleToVoid.id}/credit-note-confirm`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -195,7 +195,7 @@ export const ReportsView: React.FC<Props> = ({ settings }) => {
 
       const payload = {
         originalInvoiceNumber: manualNcNumber,
-        originalPrinterSerial: manualNcSerial || 'ACLAS-PP9',
+        originalPrinterSerial: manualNcSerial || 'ZZP0014899',
         originalInvoiceDate: manualNcDate,
         port: settings?.fiscal_printer_port || 'USB',
         model: settings?.fiscal_printer_model || 'ACLAS PP9 - PLUS',
@@ -1398,7 +1398,7 @@ export const ReportsView: React.FC<Props> = ({ settings }) => {
                   type="text"
                   value={targetFiscalNumber}
                   onChange={e => setTargetFiscalNumber(e.target.value)}
-                  placeholder="Ej: 00000003"
+                  placeholder="Ej: 00016621"
                   className="w-full bg-[#0f172a] border border-slate-700 rounded-xl px-3 py-2 text-xs font-mono font-bold text-blue-400 focus:outline-none focus:border-blue-500"
                 />
                 <span className="text-[10px] text-slate-400 mt-0.5 block">
@@ -1488,7 +1488,7 @@ export const ReportsView: React.FC<Props> = ({ settings }) => {
                   type="text"
                   value={manualNcNumber}
                   onChange={e => setManualNcNumber(e.target.value)}
-                  placeholder="Ej: 00000003"
+                  placeholder="Ej: 00016621"
                   className="w-full bg-[#0f172a] border border-slate-700 rounded-xl px-3 py-2 text-xs font-mono font-bold text-emerald-400 focus:outline-none focus:border-emerald-500"
                 />
               </div>

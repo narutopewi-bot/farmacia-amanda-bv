@@ -4,5 +4,7 @@
   "port": "USB",
   "baudRate": 9600,
   "distributor": "The Factory HKA, C.A.",
-  "registroSeniat": "HKA-PP9PLUS"
+  "registroSeniat": "HKA-PP9PLUS",
+  "serialNumber": "ZZP0014899",
+  "rif": "J-503951060"
 }

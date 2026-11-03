@@ -406,6 +406,12 @@ export function initDatabase() {
 
   seedInitialData();
 
+  // Migración para sincronizar correlativo y serial oficial SENIAT de FAC-000001
+  try {
+    db.prepare("UPDATE sales SET fiscal_invoice_number = '00016621', fiscal_serial = 'ZZP0014899', created_at = '2026-11-02 21:33:00' WHERE invoice_number = 'FAC-000001'").run();
+    db.prepare("UPDATE settings SET fiscal_serial = 'ZZP0014899', rif = 'J-503951060', pharmacy_name = 'Expendio de Medicinas Amanda B&V C.A.', address = 'Calle La Esperanza Local Nro S/N Sector 1 Arenales Edo Lara Zona Postal 3050' WHERE id = 1").run();
+  } catch(e){}
+
   // Auto-seed maestro si la base de datos está vacía o tiene menos de 50 productos
   try {
     const pCount = db.prepare('SELECT count(*) as count FROM products').get()?.count || 0;
@@ -473,8 +479,8 @@ export function initDatabase() {
           'FAC-000001', 1, 1, 1, 'DIRECT',
           'CASH_BS', 2.27, 0.0, 0.0, 2.27, 2.27, 0.0,
           0, 'Factura impresa en prueba física de impresora ACLAS PP9',
-          '2026-11-03 00:32:10', 889.58, 2019.35, 'USD',
-          0.0, 'SYNCED', '00000003', 'ACLAS-PP9', 'PAID'
+          '2026-11-02 21:33:00', 889.58, 2019.35, 'USD',
+          0.0, 'SYNCED', '00016621', 'ZZP0014899', 'PAID'
         )
       `).run();
       const saleId = insSale.lastInsertRowid;

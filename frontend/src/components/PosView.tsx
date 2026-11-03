@@ -1254,7 +1254,7 @@ export const PosView: React.FC<PosViewProps> = ({
               </div>
               <div className="text-[10px] text-slate-400 font-medium">
                 {fiscalBridgeStatus.online 
-                  ? `Puerto: ${fiscalBridgeStatus.info?.assignedPort || 'USB'} • localhost:9095`
+                  ? `Serial: ${fiscalBridgeStatus.info?.printerSerial || 'ZZP0014899'} • Próx. Factura: #${fiscalBridgeStatus.info?.nextInvoiceNumber || '00016622'}`
                   : 'Puente cerrado (clic para ayuda)'}
               </div>
             </div>
@@ -2730,7 +2730,7 @@ export const PosView: React.FC<PosViewProps> = ({
                     type="text"
                     value={posTargetFiscalNumber}
                     onChange={e => setPosTargetFiscalNumber(e.target.value)}
-                    placeholder="Ej: 00000003"
+                    placeholder="Ej: 00016621"
                     className="w-full bg-[#0f172a] border border-slate-700 rounded-xl px-3 py-2 text-xs font-mono font-bold text-blue-400 focus:outline-none focus:border-blue-500"
                   />
                   <span className="text-[10px] text-slate-400 mt-0.5 block">
@@ -2835,7 +2835,7 @@ export const PosView: React.FC<PosViewProps> = ({
                                 onClick={() => {
                                   setSaleToVoid(s);
                                   setVoidReason('Devolución de mercancía');
-                                  setPosTargetFiscalNumber(s.fiscal_invoice_number || '00000003');
+                                  setPosTargetFiscalNumber(s.fiscal_invoice_number || '00016621');
                                 }}
                                 className="px-2.5 py-1 bg-rose-600/20 hover:bg-rose-600 text-rose-300 hover:text-white rounded-lg text-[10px] font-bold border border-rose-500/40 transition cursor-pointer"
                               >
